@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Numba cache artifacts
+*.nbc
+*.nbi
+
+# Local runtime data
+block_blast_solver/calibration_data.json
+mock_hud_output.png
+
+# Local tooling
+.mcp.json
+
+# Virtual environments
+.venv/
+venv/
+env/
