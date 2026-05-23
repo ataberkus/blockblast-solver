@@ -12,6 +12,7 @@ mock_hud_output.png
 
 # Local tooling
 .mcp.json
+docs/superpowers/
 
 # Virtual environments
 .venv/
