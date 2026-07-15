@@ -1,15 +1,8 @@
-import os
-import sys
 import unittest
 
 import numpy as np
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SOLVER_ROOT = os.path.join(ROOT, "block_blast_solver")
-if SOLVER_ROOT not in sys.path:
-    sys.path.insert(0, SOLVER_ROOT)
-
-from modules import solver
+from block_blast_solver.modules import solver
 
 
 def empty_board():
@@ -137,6 +130,16 @@ class SurvivalSolverTests(unittest.TestCase):
 
         self.assertIsNone(moves)
         self.assertLess(score, -1e8)
+
+    def test_rejects_invalid_board_and_piece_inputs(self):
+        with self.assertRaisesRegex(ValueError, "shape"):
+            solver.solve(np.zeros((7, 8), dtype=np.uint8), [piece([[1]])])
+        with self.assertRaisesRegex(ValueError, "binary"):
+            solver.solve(np.full((8, 8), 2, dtype=np.uint8), [piece([[1]])])
+        with self.assertRaisesRegex(ValueError, "non-empty binary"):
+            solver.solve(empty_board(), [np.zeros((1, 1), dtype=np.uint8)])
+        with self.assertRaisesRegex(ValueError, "at most three"):
+            solver.solve(empty_board(), [piece([[1]])] * 4)
 
 
 if __name__ == "__main__":

@@ -1,16 +1,9 @@
-import os
-import sys
 import unittest
 from unittest import mock
 
 import numpy as np
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SOLVER_ROOT = os.path.join(ROOT, "block_blast_solver")
-if SOLVER_ROOT not in sys.path:
-    sys.path.insert(0, SOLVER_ROOT)
-
-from modules.visualizer import Visualizer, summarize_move_sequence
+from block_blast_solver.modules.visualizer import Visualizer, summarize_move_sequence
 
 
 class VisualizerOutcomeTests(unittest.TestCase):
@@ -45,6 +38,18 @@ class VisualizerOutcomeTests(unittest.TestCase):
         self.assertEqual(hud.shape[0], frame.shape[0])
         self.assertEqual(hud.shape[1], frame.shape[1] + 320)
 
+    def test_summary_marks_overlapping_move_invalid_without_mutating_board(self):
+        board = np.zeros((8, 8), dtype=np.uint8)
+        board[0, 0] = 1
+        pieces = [np.ones((1, 2), dtype=np.uint8)]
+        moves = [{"slot_index": 0, "row": 0, "col": 0}]
+
+        outcomes, total_clears, final_filled = summarize_move_sequence(board, pieces, moves)
+
+        self.assertTrue(outcomes[0]["invalid"])
+        self.assertEqual(total_clears, 0)
+        self.assertEqual(final_filled, 1)
+
     def test_draw_hud_accepts_solver_diagnostics(self):
         frame = np.zeros((120, 200, 3), dtype=np.uint8)
         board = np.zeros((8, 8), dtype=np.uint8)
@@ -76,7 +81,7 @@ class VisualizerOutcomeTests(unittest.TestCase):
         }
 
         rendered_texts = []
-        import modules.visualizer as viz_module
+        from block_blast_solver.modules import visualizer as viz_module
         real_put_text = viz_module.cv2.putText
 
         def capture(img, text, org, *args, **kwargs):

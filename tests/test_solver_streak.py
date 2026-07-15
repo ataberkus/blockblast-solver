@@ -69,7 +69,7 @@ class StreakVsFatClearTests(unittest.TestCase):
         moves, score, diagnostics = solver.solve_with_diagnostics(board, pieces)
 
         self.assertIsNotNone(moves)
-        from modules.visualizer import summarize_move_sequence
+        from block_blast_solver.modules.visualizer import summarize_move_sequence
         outcomes, total_clears, _ = summarize_move_sequence(board, pieces, moves)
         per_placement_clears = [o["clear_count"] for o in outcomes]
         self.assertTrue(

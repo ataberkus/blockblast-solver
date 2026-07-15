@@ -1,10 +1,68 @@
-import cv2
 import ctypes
-import dxcam
+import logging
+import sys
+from typing import Optional, Protocol, Tuple
+
+import cv2
 import numpy as np
-import pygetwindow as gw
-from typing import Tuple, Optional
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__))); import config
+
+from block_blast_solver import config
+
+logger = logging.getLogger(__name__)
+
+
+class CaptureBackend(Protocol):
+    def capture_frame(self) -> Optional[np.ndarray]: ...
+
+    def calibrate(self) -> bool: ...
+
+    def get_roi_rect(
+        self,
+        roi_ratios: list,
+        frame_shape: Tuple[int, int, int],
+    ) -> Tuple[int, int, int, int]: ...
+
+    def close(self) -> None: ...
+
+
+def roi_to_rect(
+    roi_ratios: list,
+    frame_shape: Tuple[int, int, int],
+) -> Tuple[int, int, int, int]:
+    valid, reason = config.validate_roi(roi_ratios)
+    if not valid:
+        raise ValueError(reason)
+    height, width, _ = frame_shape
+    x, y, roi_width, roi_height = roi_ratios
+    return (
+        int(x * width),
+        int(y * height),
+        int(roi_width * width),
+        int(roi_height * height),
+    )
+
+
+class StaticFrameCapture:
+    """Headless capture backend for replay tests and local vision debugging."""
+
+    def __init__(self, frame: np.ndarray):
+        self.frame = frame.copy()
+
+    def capture_frame(self) -> Optional[np.ndarray]:
+        return self.frame.copy()
+
+    def calibrate(self) -> bool:
+        return config.BOARD_ROI is not None and config.PIECES_ROI is not None
+
+    def get_roi_rect(
+        self,
+        roi_ratios: list,
+        frame_shape: Tuple[int, int, int],
+    ) -> Tuple[int, int, int, int]:
+        return roi_to_rect(roi_ratios, frame_shape)
+
+    def close(self) -> None:
+        return None
 
 # =====================================================================
 # BLOCK BLAST SOLVER - EKRAN YAKALAMA VE KALİBRASYON MODÜLÜ (capture.py)
@@ -12,10 +70,12 @@ import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__))); 
 
 class WindowCapture:
     """
-    Hedef pencereyi (örn: UxPlay) yakalamaktan, ekran görüntüsünü düşük gecikmeyle
+    Hedef LonelyScreen penceresini yakalamaktan, ekran görüntüsünü düşük gecikmeyle
     çekmekten ve kullanıcıdan ROI kalibrasyonu almaktan sorumlu sınıftır.
     """
     def __init__(self, window_title: str):
+        if sys.platform != "win32":
+            raise RuntimeError("Live window capture requires Windows; use StaticFrameCapture for headless runs")
         self.window_title = window_title
         self.cameras = {}       # output_idx -> dxcam camera
         self.monitor_rects = {} # output_idx -> (left, top, right, bottom)
@@ -26,6 +86,8 @@ class WindowCapture:
 
     def _init_cameras(self):
         """Enumerate all monitors and create a dxcam camera for each."""
+        import dxcam
+
         class RECT(ctypes.Structure):
             _fields_ = [('left', ctypes.c_long), ('top', ctypes.c_long),
                         ('right', ctypes.c_long), ('bottom', ctypes.c_long)]
@@ -49,9 +111,9 @@ class WindowCapture:
                 self.cameras[idx] = cam
                 self.monitor_rects[idx] = rect
                 ml, mt, mr, mb = rect
-                print(f"[BİLGİ] Ekran {idx} tespit edildi: {mr - ml}x{mb - mt} @ ({ml},{mt})")
-            except Exception as e:
-                print(f"[UYARI] Ekran {idx} kamerası oluşturulamadı: {e}")
+                logger.info("Display %d detected: %dx%d @ (%d,%d)", idx, mr - ml, mb - mt, ml, mt)
+            except Exception as error:
+                logger.warning("Could not create camera for display %d: %s", idx, error)
 
         if not self.cameras:
             cam = dxcam.create(output_color="BGR")
@@ -76,9 +138,11 @@ class WindowCapture:
         pygetwindow kütüphanesi kullanarak hedef pencereyi bulur.
         Eğer pencere simge durumuna küçültülmüşse (minimized) geri yükler (restore).
         """
+        import pygetwindow as gw
+
         windows = gw.getWindowsWithTitle(self.window_title)
         if not windows:
-            print(f"[UYARI] '{self.window_title}' başlığına sahip bir pencere bulunamadı.")
+            logger.warning("Window not found: %s", self.window_title)
             self.window_handle = None
             return False
 
@@ -88,9 +152,9 @@ class WindowCapture:
         if self.window_handle.isMinimized:
             try:
                 self.window_handle.restore()
-                print(f"[BİLGİ] '{self.window_title}' penceresi simge durumundan kurtarıldı.")
-            except Exception as e:
-                print(f"[UYARI] Pencere kurtarılamadı: {e}")
+                logger.info("Restored minimized window: %s", self.window_title)
+            except Exception as error:
+                logger.warning("Could not restore window: %s", error)
 
         # Pencereyi aktif hale getirmeyi deneyelim (opsiyonel)
         try:
@@ -99,15 +163,19 @@ class WindowCapture:
             # Bazı Windows güvenlik ayarları doğrudan aktivasyona izin vermeyebilir
             pass
 
-        print(f"[BİLGİ] Pencere bulundu: {self.window_handle.title} | "
-              f"Konum: ({self.window_handle.left}, {self.window_handle.top}) | "
-              f"Boyut: {self.window_handle.width}x{self.window_handle.height}")
+        logger.info(
+            "Window found: %s at (%d, %d), size %dx%d",
+            self.window_handle.title,
+            self.window_handle.left,
+            self.window_handle.top,
+            self.window_handle.width,
+            self.window_handle.height,
+        )
         return True
 
     def capture_frame(self) -> Optional[np.ndarray]:
         """
-        mss kütüphanesi kullanarak hedef pencerenin sınırlarını yüksek hızda yakalar.
-        Renk uzayını BGRA'dan standard BGR'a dönüştürür ve numpy array olarak döndürür.
+        Capture the target window through DXGI and return a BGR numpy array.
         """
         if self.window_handle is None or not self._is_window_valid(self.window_handle):
             if not self.find_window():
@@ -147,8 +215,8 @@ class WindowCapture:
                 return None
             return frame_bgr
 
-        except Exception as e:
-            print(f"[HATA] Ekran görüntüsü yakalanamadı: {e}")
+        except Exception as error:
+            logger.error("Screen capture failed: %s", error)
             self.window_handle = None  # Bir sonraki döngüde yeniden aramayı tetiklesin diye sıfırlıyoruz
             return None
 
@@ -170,27 +238,27 @@ class WindowCapture:
         2. Alt Parça Alanı (PIECES_ROI)
         Seçilen bölgeleri normalleştirilmiş oranlar halinde calibration_data.json dosyasına kaydeder.
         """
-        print("[BİLGİ] Kalibrasyon başlatılıyor. Lütfen pencerenin görünür olduğundan emin olun...")
+        logger.info("Starting calibration; ensure the target window is visible")
 
         # Pencere ekran dışındaysa kullanıcıyı uyar ve pencereyi taşı
         frame = self.capture_frame()
         if frame is None:
             if self.window_handle is not None:
-                print("[UYARI] Pencere ekran dışında görünüyor. Pencere ekranın ortasına taşınıyor...")
+                logger.warning("Window appears off-screen; moving it to the primary display")
                 try:
                     mon_idx = list(self.cameras.keys())[0]
                     ml, mt, mr, mb = self.monitor_rects[mon_idx]
                     self.window_handle.moveTo((ml + mr) // 4, (mt + mb) // 4)
                     import time; time.sleep(0.5)
                     frame = self.capture_frame()
-                except Exception as e:
-                    print(f"[HATA] Pencere taşınamadı: {e}")
+                except Exception as error:
+                    logger.error("Could not move window: %s", error)
             if frame is None:
-                print("[HATA] Kalibrasyon için ekran görüntüsü alınamadı. LonelyScreen penceresini ekrana taşıyın ve tekrar deneyin.")
+                logger.error("Could not capture a frame for calibration")
                 return False
 
         h, w, _ = frame.shape
-        print(f"[BİLGİ] Ekran görüntüsü alındı: {w}x{h}. Lütfen oyun alanını seçin.")
+        logger.info("Captured %dx%d frame; select the game board", w, h)
 
         # 1. 8x8 Ana Oyun Tahtasını Seç (Kullanıcıya açıklayıcı metin ekleyelim)
         board_instruction_frame = frame.copy()
@@ -207,11 +275,11 @@ class WindowCapture:
 
         # Geçersiz ROI kontrolü (seçim iptal edilirse w veya h sıfır olur)
         if r_board[2] == 0 or r_board[3] == 0:
-            print("[UYARI] Oyun tahtası seçimi iptal edildi.")
+            logger.warning("Board selection cancelled")
             return False
 
         # 2. Alt Parçaların Bölgesini Seç (Kullanıcıya açıklayıcı metin ekleyelim)
-        print("[BİLGİ] Lütfen aşağıdaki 3 parçayı kapsayan envanter alanını seçin.")
+        logger.info("Select the inventory area containing all three pieces")
         pieces_instruction_frame = frame.copy()
         cv2.putText(pieces_instruction_frame, "SADECE ALTTAN 3 PARCA ALANINI SECIN!", (20, 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2, cv2.LINE_AA)
@@ -222,7 +290,7 @@ class WindowCapture:
         cv2.destroyWindow("Kalibrasyon - Parca Alanini Secin")
 
         if r_pieces[2] == 0 or r_pieces[3] == 0:
-            print("[UYARI] Parça alanı seçimi iptal edildi.")
+            logger.warning("Inventory selection cancelled")
             return False
 
         # Koordinatları pencere genişliği ve yüksekliğine bölerek oranla (normalleştir)
@@ -242,18 +310,15 @@ class WindowCapture:
         ]
 
         # Konfigürasyona ve JSON dosyasına kaydet
-        config.save_calibration(board_roi, pieces_roi)
-        return True
+        return config.save_calibration(board_roi, pieces_roi)
 
     def get_roi_rect(self, roi_ratios: list, frame_shape: Tuple[int, int, int]) -> Tuple[int, int, int, int]:
         """
         Oransal koordinatları (ratios) verilen kare boyutuna göre piksel koordinatlarına (x, y, w, h) geri dönüştürür.
         """
-        h, w, _ = frame_shape
-        rx, ry, rw, rh = roi_ratios
-        return (
-            int(rx * w),
-            int(ry * h),
-            int(rw * w),
-            int(rh * h)
-        )
+        return roi_to_rect(roi_ratios, frame_shape)
+
+    def close(self) -> None:
+        self.cameras.clear()
+        self.monitor_rects.clear()
+        self.window_handle = None

@@ -1,15 +1,8 @@
-import os
-import sys
 import unittest
 
 import numpy as np
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SOLVER_ROOT = os.path.join(ROOT, "block_blast_solver")
-if SOLVER_ROOT not in sys.path:
-    sys.path.insert(0, SOLVER_ROOT)
-
-from modules import solver
+from block_blast_solver.modules import solver
 
 
 def empty_board():
@@ -33,19 +26,29 @@ class MonteCarloSolverTests(unittest.TestCase):
     def test_piece_catalog_contains_rotated_and_mirrored_families(self):
         masks, shapes, families = solver.get_monte_carlo_piece_catalog()
 
-        self.assertGreaterEqual(masks.shape[0], 24)
+        self.assertEqual(masks.shape[0], 25)
         self.assertEqual(masks.shape[0], shapes.shape[0])
         self.assertEqual(masks.shape[0], families.shape[0])
+        self.assertEqual(len({int(mask) for mask in masks}), masks.shape[0])
         self.assertIn(9, set(int(family) for family in families))
         self.assertIn(25, set(int(family) for family in families))
 
-    def test_next_piece_samples_are_deterministic(self):
-        first = solver.get_next_piece_samples(24)
-        second = solver.get_next_piece_samples(24)
+    def test_next_piece_samples_are_deterministic_and_board_specific(self):
+        first = solver.get_next_piece_samples(24, 0, 1234)
+        second = solver.get_next_piece_samples(24, 0, 1234)
+        different_board = solver.get_next_piece_samples(24, 1, 1234)
 
         self.assertEqual(first.shape, (24, 3))
         self.assertTrue(np.array_equal(first, second))
+        self.assertFalse(np.array_equal(first, different_board))
         self.assertGreater(int(np.max(first)), 0)
+
+    def test_zero_samples_return_zero_metrics(self):
+        samples = solver.get_next_piece_samples(0)
+        metrics = solver.evaluate_monte_carlo_survival_jit(0, 0)
+
+        self.assertEqual(samples.shape, (0, 3))
+        self.assertEqual(metrics, (0.0, 0.0, 0, 0, 0.0))
 
     def test_monte_carlo_rewards_more_playable_next_sets(self):
         open_board = empty_board()
@@ -93,6 +96,17 @@ class MonteCarloSolverTests(unittest.TestCase):
         self.assertLess(score, -1e8)
         self.assertEqual(diagnostics["risk_level"], "dead")
         self.assertEqual(diagnostics["next_survival_pct"], 0.0)
+
+    def test_node_budget_returns_best_so_far_with_diagnostics(self):
+        board = empty_board()
+        pieces = [piece([[1]]), None, None]
+
+        moves, score, diagnostics = solver.solve_with_diagnostics(board, pieces, node_budget=2)
+
+        self.assertIsNotNone(moves)
+        self.assertGreater(score, -1e8)
+        self.assertEqual(diagnostics["search_nodes"], 2)
+        self.assertTrue(diagnostics["search_budget_exhausted"])
 
 
 if __name__ == "__main__":
