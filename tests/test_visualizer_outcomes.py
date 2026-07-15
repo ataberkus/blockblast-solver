@@ -3,10 +3,19 @@ from unittest import mock
 
 import numpy as np
 
+from block_blast_solver import config
 from block_blast_solver.modules.visualizer import Visualizer, summarize_move_sequence
 
 
 class VisualizerOutcomeTests(unittest.TestCase):
+    def setUp(self):
+        self.previous_board_roi = config.BOARD_ROI
+        self.previous_pieces_roi = config.PIECES_ROI
+
+    def tearDown(self):
+        config.BOARD_ROI = self.previous_board_roi
+        config.PIECES_ROI = self.previous_pieces_roi
+
     def test_summarizes_multi_step_column_clear(self):
         board = np.zeros((8, 8), dtype=np.uint8)
         board[7, 0:3] = 1
@@ -93,6 +102,58 @@ class VisualizerOutcomeTests(unittest.TestCase):
 
         self.assertTrue(any("Next streak: 75%" in t for t in rendered_texts),
                         f"Expected 'Next streak: 75%' in HUD texts, got: {rendered_texts}")
+
+    def test_draw_hud_renders_move_overlays_with_single_blend(self):
+        config.BOARD_ROI = [0.1, 0.1, 0.8, 0.8]
+        config.PIECES_ROI = [0.1, 0.75, 0.8, 0.2]
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        board = np.zeros((8, 8), dtype=np.uint8)
+        pieces = [np.ones((1, 2), dtype=np.uint8), None, None]
+        moves = [{"slot_index": 0, "row": 1, "col": 2}]
+
+        from block_blast_solver.modules import visualizer as viz_module
+        blend_calls = []
+        real_add_weighted = viz_module.cv2.addWeighted
+        rendered_texts = []
+        real_put_text = viz_module.cv2.putText
+
+        def capture_blend(*args, **kwargs):
+            blend_calls.append(1)
+            return real_add_weighted(*args, **kwargs)
+
+        def capture_text(img, text, org, *args, **kwargs):
+            rendered_texts.append(text)
+            return real_put_text(img, text, org, *args, **kwargs)
+
+        with mock.patch.object(viz_module.cv2, "addWeighted", side_effect=capture_blend):
+            with mock.patch.object(viz_module.cv2, "putText", side_effect=capture_text):
+                hud = Visualizer().draw_hud(frame, board, pieces, moves, 42.5, False)
+
+        self.assertEqual(hud.shape, (240, 640, 3))
+        self.assertEqual(len(blend_calls), 1)
+        self.assertTrue(any("1. P1 -> (1,2)" in text for text in rendered_texts))
+        self.assertTrue(any("Estimated score: 42.5" in text for text in rendered_texts))
+
+    def test_draw_hud_shows_occluded_and_warning_status_messages(self):
+        frame = np.zeros((120, 200, 3), dtype=np.uint8)
+        board = np.zeros((8, 8), dtype=np.uint8)
+        pieces = [np.ones((1, 1), dtype=np.uint8), None, None]
+
+        from block_blast_solver.modules import visualizer as viz_module
+        rendered_texts = []
+        real_put_text = viz_module.cv2.putText
+
+        def capture_text(img, text, org, *args, **kwargs):
+            rendered_texts.append(text)
+            return real_put_text(img, text, org, *args, **kwargs)
+
+        with mock.patch.object(viz_module.cv2, "putText", side_effect=capture_text):
+            Visualizer().draw_hud(frame, board, pieces, None, 0.0, True)
+            Visualizer().draw_hud(frame, board, pieces, None, 0.0, False)
+
+        self.assertTrue(any(text == "OCCLUDED" for text in rendered_texts))
+        self.assertTrue(any("Occluded; using last advice" in text for text in rendered_texts))
+        self.assertTrue(any("WARNING: No valid move" in text for text in rendered_texts))
 
 
 if __name__ == "__main__":

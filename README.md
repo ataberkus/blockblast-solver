@@ -79,3 +79,5 @@ python scripts/benchmark_solver.py --iterations 10
 GitHub Actions runs lint, coverage, and tests on Python 3.11/3.13 Linux plus a Python 3.13 Windows capture-import smoke test.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for platform notes and the pull-request checklist.
+
+This project is released under the [MIT License](LICENSE).
