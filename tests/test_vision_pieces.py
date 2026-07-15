@@ -1,17 +1,10 @@
-import os
-import sys
 import unittest
 
 import cv2
 import numpy as np
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SOLVER_ROOT = os.path.join(ROOT, "block_blast_solver")
-if SOLVER_ROOT not in sys.path:
-    sys.path.insert(0, SOLVER_ROOT)
-
-import config
-from modules import vision
+from block_blast_solver import config
+from block_blast_solver.modules import vision
 
 
 def draw_inventory(shapes, block_size=23):

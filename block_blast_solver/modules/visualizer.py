@@ -1,7 +1,9 @@
+from typing import Any, Dict, List, Optional, Tuple
+
 import cv2
 import numpy as np
-from typing import List, Dict, Any, Optional, Tuple
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__))); import config
+
+from block_blast_solver import config
 
 # =====================================================================
 # BLOCK BLAST SOLVER - GÖRSEL HUD VE ARTTIRILMIŞ GERÇEKLİK PANELİ (visualizer.py)
@@ -30,6 +32,7 @@ def summarize_move_sequence(board_state: np.ndarray,
         else:
             piece_matrix = pieces[slot]
             ph, pw = piece_matrix.shape
+            placement_cells = []
 
             for piece_r in range(ph):
                 for piece_c in range(pw):
@@ -41,9 +44,14 @@ def summarize_move_sequence(board_state: np.ndarray,
                     if cell_row < 0 or cell_row >= 8 or cell_col < 0 or cell_col >= 8:
                         invalid = True
                         continue
-                    simulated_board[cell_row, cell_col] = 1
+                    if simulated_board[cell_row, cell_col] == 1:
+                        invalid = True
+                        continue
+                    placement_cells.append((cell_row, cell_col))
 
             if not invalid:
+                for cell_row, cell_col in placement_cells:
+                    simulated_board[cell_row, cell_col] = 1
                 for board_row in range(8):
                     if np.all(simulated_board[board_row, :] == 1):
                         cleared_rows.append(board_row)
@@ -127,13 +135,13 @@ class Visualizer:
         # Durum Bilgisi
         y_pos += 40
         if occluded:
-            status_text = "ENGELENDI (Hand/Finger)"
+            status_text = "OCCLUDED"
             status_color = (0, 0, 255)  # Kırmızı
         else:
-            status_text = "Aktif (Scanning)"
+            status_text = "ACTIVE"
             status_color = (0, 255, 0)  # Yeşil
 
-        cv2.putText(hud_frame, f"Durum: ", (panel_x + 10, y_pos),
+        cv2.putText(hud_frame, "Status:", (panel_x + 10, y_pos),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA)
         cv2.putText(hud_frame, status_text, (panel_x + 70, y_pos),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color, 1, cv2.LINE_AA)
@@ -172,7 +180,7 @@ class Visualizer:
 
         # 4. Çözüm Önerilerini Çiz ve Yan Panele Yaz
         y_pos += 160
-        cv2.putText(hud_frame, "HAMLE STRATEJISI:", (panel_x + 10, y_pos),
+        cv2.putText(hud_frame, "MOVE STRATEGY:", (panel_x + 10, y_pos),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1, cv2.LINE_AA)
         cv2.line(hud_frame, (panel_x + 10, y_pos + 6), (panel_x + panel_width - 10, y_pos + 6), (100, 100, 100), 1)
 
@@ -185,6 +193,8 @@ class Visualizer:
             bh = int(config.BOARD_ROI[3] * h)
             cell_w = bw / 8.0
             cell_h = bh / 8.0
+            game_overlay = hud_frame[:, :w].copy()
+            highlighted_cells = []
 
             for idx, move in enumerate(moves):
                 step_num = idx + 1
@@ -216,18 +226,11 @@ class Visualizer:
                         px_end = bx + int((cell_col + 1) * cell_w)
                         py_end = by + int((cell_row + 1) * cell_h)
 
-                        cell_overlay = hud_frame.copy()
-                        cv2.rectangle(cell_overlay, (px_start, py_start), (px_end, py_end), color, -1)
-                        cv2.addWeighted(cell_overlay, 0.22, hud_frame, 0.78, 0, hud_frame)
-                        cv2.rectangle(hud_frame, (px_start, py_start), (px_end, py_end), color, 3)
-
-                        if not label_drawn:
-                            txt = str(step_num)
-                            cv2.putText(hud_frame, txt, (px_start + 10, py_start + 35),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 1.1, (0, 0, 0), 5, cv2.LINE_AA)
-                            cv2.putText(hud_frame, txt, (px_start + 10, py_start + 35),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 2, cv2.LINE_AA)
-                            label_drawn = True
+                        cv2.rectangle(game_overlay, (px_start, py_start), (px_end, py_end), color, -1)
+                        highlighted_cells.append(
+                            (px_start, py_start, px_end, py_end, color, step_num if not label_drawn else None)
+                        )
+                        label_drawn = True
 
                 # Yan panele metin olarak ekle
                 move_text = f"{step_num}. P{slot + 1} -> ({row},{col})"
@@ -238,36 +241,46 @@ class Visualizer:
                 cv2.putText(hud_frame, move_text, (panel_x + 10, y_pos),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
                 y_pos += 25
-            
-            cv2.putText(hud_frame, f"Toplam clear: {total_clears}", (panel_x + 10, y_pos + 5),
+
+            cv2.addWeighted(game_overlay, 0.22, hud_frame[:, :w], 0.78, 0, hud_frame[:, :w])
+            for px_start, py_start, px_end, py_end, color, label in highlighted_cells:
+                cv2.rectangle(hud_frame, (px_start, py_start), (px_end, py_end), color, 3)
+                if label is not None:
+                    text = str(label)
+                    cv2.putText(hud_frame, text, (px_start + 10, py_start + 35),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.1, (0, 0, 0), 5, cv2.LINE_AA)
+                    cv2.putText(hud_frame, text, (px_start + 10, py_start + 35),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 2, cv2.LINE_AA)
+
+            cv2.putText(hud_frame, f"Total clears: {total_clears}", (panel_x + 10, y_pos + 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (210, 210, 210), 1, cv2.LINE_AA)
             y_pos += 20
-            cv2.putText(hud_frame, f"Kalan blok: {final_filled}", (panel_x + 10, y_pos + 5),
+            cv2.putText(hud_frame, f"Blocks left: {final_filled}", (panel_x + 10, y_pos + 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (210, 210, 210), 1, cv2.LINE_AA)
             y_pos += 20
 
             # AI Skor Değeri
-            cv2.putText(hud_frame, f"Tahmini Skor: {score:.1f}", (panel_x + 10, y_pos + 10),
+            cv2.putText(hud_frame, f"Estimated score: {score:.1f}", (panel_x + 10, y_pos + 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
         else:
-            status_desc = "Cozum hesaplaniyor..."
+            status_desc = "Calculating solution..."
             if occluded:
-                status_desc = "Occluded (Goruntu Kapatildi)"
+                status_desc = "Occluded; using last advice"
             elif not any(p is not None for p in pieces):
-                status_desc = "Envanter Boş (Bekleniyor)"
+                status_desc = "Waiting for inventory"
             else:
-                status_desc = "UYARI: Uygun hamle yok!"
+                status_desc = "WARNING: No valid move"
             
             cv2.putText(hud_frame, status_desc, (panel_x + 10, y_pos),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255) if "UYARI" in status_desc else (150, 150, 150), 1, cv2.LINE_AA)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255) if "WARNING" in status_desc else (150, 150, 150), 1, cv2.LINE_AA)
 
         # Kısayol Tuşları Bilgilendirmesi (En Alt)
         y_pos_controls = h - 60
-        cv2.putText(hud_frame, "KONTROLLER:", (panel_x + 10, y_pos_controls),
+        cv2.putText(hud_frame, "CONTROLS:", (panel_x + 10, y_pos_controls),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-        cv2.putText(hud_frame, "c: Yeni Kalibrasyon", (panel_x + 10, y_pos_controls + 20),
+        cv2.putText(hud_frame, "c: Recalibrate", (panel_x + 10, y_pos_controls + 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1, cv2.LINE_AA)
-        cv2.putText(hud_frame, "q: Programdan Cikis", (panel_x + 10, y_pos_controls + 35),
+        cv2.putText(hud_frame, "q: Quit", (panel_x + 10, y_pos_controls + 35),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1, cv2.LINE_AA)
 
         return hud_frame

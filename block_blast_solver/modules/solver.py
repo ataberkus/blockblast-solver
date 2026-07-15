@@ -1,7 +1,21 @@
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 from numba import njit
-from typing import List, Optional, Tuple, Dict, Any
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__))); import config
+
+from block_blast_solver import config
+
+FUTURE_SET_PERMUTATIONS = np.array(
+    [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ],
+    dtype=np.int32,
+)
 
 # =====================================================================
 # BLOCK BLAST SOLVER - NUMBA HIZLANDIRILMIŞ YAPAY ZEKA ÇÖZÜCÜ (solver.py)
@@ -215,9 +229,10 @@ def calculate_line_readiness_survival_jit(board_mask: int) -> int:
 
 @njit(cache=True)
 def get_monte_carlo_piece_catalog() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    masks = np.zeros(28, dtype=np.uint64)
-    shapes = np.zeros((28, 2), dtype=np.int32)
-    families = np.zeros(28, dtype=np.int32)
+    """Return unique piece orientations used by future-set sampling."""
+    masks = np.zeros(25, dtype=np.uint64)
+    shapes = np.zeros((25, 2), dtype=np.int32)
+    families = np.zeros(25, dtype=np.int32)
 
     masks[0] = np.uint64(0x1); shapes[0, 0] = 1; shapes[0, 1] = 1; families[0] = 1
     masks[1] = np.uint64(0x3); shapes[1, 0] = 1; shapes[1, 1] = 2; families[1] = 2
@@ -242,28 +257,61 @@ def get_monte_carlo_piece_catalog() -> Tuple[np.ndarray, np.ndarray, np.ndarray]
 
     masks[19] = np.uint64(0x207); shapes[19, 0] = 2; shapes[19, 1] = 3; families[19] = 19
     masks[20] = np.uint64(0x702); shapes[20, 0] = 2; shapes[20, 1] = 3; families[20] = 19
-    masks[21] = np.uint64(0x10203); shapes[21, 0] = 3; shapes[21, 1] = 2; families[21] = 19
-    masks[22] = np.uint64(0x30102); shapes[22, 0] = 3; shapes[22, 1] = 2; families[22] = 19
 
-    masks[23] = np.uint64(0x306); shapes[23, 0] = 2; shapes[23, 1] = 3; families[23] = 23
-    masks[24] = np.uint64(0x603); shapes[24, 0] = 2; shapes[24, 1] = 3; families[24] = 23
-    masks[25] = np.uint64(0x10206); shapes[25, 0] = 3; shapes[25, 1] = 2; families[25] = 23
-    masks[26] = np.uint64(0x20103); shapes[26, 0] = 3; shapes[26, 1] = 2; families[26] = 23
+    masks[21] = np.uint64(0x306); shapes[21, 0] = 2; shapes[21, 1] = 3; families[21] = 23
+    masks[22] = np.uint64(0x603); shapes[22, 0] = 2; shapes[22, 1] = 3; families[22] = 23
+    masks[23] = np.uint64(0x10206); shapes[23, 0] = 3; shapes[23, 1] = 2; families[23] = 23
 
-    masks[27] = np.uint64(0x707); shapes[27, 0] = 2; shapes[27, 1] = 3; families[27] = 27
+    masks[24] = np.uint64(0x707); shapes[24, 0] = 2; shapes[24, 1] = 3; families[24] = 27
     return masks, shapes, families
 
 
 @njit(cache=True)
-def get_next_piece_samples(sample_count: int) -> np.ndarray:
-    masks, _, _ = get_monte_carlo_piece_catalog()
-    catalog_size = masks.shape[0]
-    samples = np.zeros((sample_count, 3), dtype=np.int32)
+def get_catalog_cumulative_weights(families: np.ndarray) -> Tuple[np.ndarray, int]:
+    """Weight families equally while distributing weight across orientations."""
+    family_counts = np.zeros(32, dtype=np.int32)
+    for family in families:
+        family_counts[family] += 1
 
-    for sample_idx in range(sample_count):
-        samples[sample_idx, 0] = (sample_idx * 7 + 3) % catalog_size
-        samples[sample_idx, 1] = (sample_idx * 11 + 5) % catalog_size
-        samples[sample_idx, 2] = (sample_idx * 17 + 9) % catalog_size
+    cumulative_weights = np.zeros(families.shape[0], dtype=np.int32)
+    total_weight = 0
+    for index in range(families.shape[0]):
+        family_count = family_counts[families[index]]
+        weight = 2520 // max(1, family_count)
+        total_weight += weight
+        cumulative_weights[index] = total_weight
+    return cumulative_weights, total_weight
+
+
+@njit(cache=True)
+def _next_random_state(state: np.uint64) -> np.uint64:
+    return state * np.uint64(6364136223846793005) + np.uint64(1442695040888963407)
+
+
+@njit(cache=True)
+def _weighted_catalog_index(ticket: int, cumulative_weights: np.ndarray) -> int:
+    for index in range(cumulative_weights.shape[0]):
+        if ticket < cumulative_weights[index]:
+            return index
+    return cumulative_weights.shape[0] - 1
+
+
+@njit(cache=True)
+def get_next_piece_samples(sample_count: int, board_mask: int = 0, seed: int = 0xC0FFEE) -> np.ndarray:
+    masks, _, families = get_monte_carlo_piece_catalog()
+    catalog_size = masks.shape[0]
+    safe_sample_count = max(0, sample_count)
+    samples = np.zeros((safe_sample_count, 3), dtype=np.int32)
+    if catalog_size == 0 or safe_sample_count == 0:
+        return samples
+
+    cumulative_weights, total_weight = get_catalog_cumulative_weights(families)
+    state = np.uint64(board_mask) ^ np.uint64(seed) ^ np.uint64(safe_sample_count * 0x9E3779B9)
+    for sample_idx in range(safe_sample_count):
+        for slot in range(3):
+            state = _next_random_state(state)
+            ticket = int((state >> np.uint64(32)) % np.uint64(total_weight))
+            samples[sample_idx, slot] = _weighted_catalog_index(ticket, cumulative_weights)
 
     return samples
 
@@ -413,6 +461,7 @@ def evaluate_survival_score_jit(board_mask: int,
                                 danger_samples: int,
                                 danger_filled_cells: int,
                                 min_future_fits: int,
+                                monte_carlo_seed: int,
                                 w_monte_carlo_survival: float,
                                 w_monte_carlo_clear_routes: float,
                                 w_monte_carlo_future_fits: float,
@@ -434,7 +483,11 @@ def evaluate_survival_score_jit(board_mask: int,
         danger_filled_cells,
         min_future_fits,
     )
-    _, next_survival_pct, clear_routes, mc_future_fits, streak_continuity = evaluate_monte_carlo_survival_jit(board_mask, sample_count)
+    _, next_survival_pct, clear_routes, mc_future_fits, streak_continuity = evaluate_monte_carlo_survival_jit(
+        board_mask,
+        sample_count,
+        monte_carlo_seed,
+    )
 
     base_score = (
         (accumulated_score * 0.75)
@@ -528,10 +581,10 @@ def simulate_best_single_future_piece_jit(board_mask: int, piece_mask: int, ph: 
 
 
 @njit(cache=True)
-def simulate_next_set_survival_jit(board_mask: int,
-                                   sample: np.ndarray,
-                                   catalog_masks: np.ndarray,
-                                   catalog_shapes: np.ndarray) -> Tuple[bool, int, int, int, int]:
+def simulate_next_set_one_order_jit(board_mask: int,
+                                    sample: np.ndarray,
+                                    catalog_masks: np.ndarray,
+                                    catalog_shapes: np.ndarray) -> Tuple[bool, int, int, int, int]:
     current_board = board_mask
     total_clears = 0
     clearing_placements = 0
@@ -553,9 +606,61 @@ def simulate_next_set_survival_jit(board_mask: int,
 
 
 @njit(cache=True)
-def evaluate_monte_carlo_survival_jit(board_mask: int, sample_count: int) -> Tuple[float, float, int, int, float]:
+def simulate_next_set_survival_jit(board_mask: int,
+                                   sample: np.ndarray,
+                                   catalog_masks: np.ndarray,
+                                   catalog_shapes: np.ndarray) -> Tuple[bool, int, int, int, int]:
+    """Try every piece order and retain the most playable greedy outcome."""
+    best_survived = False
+    best_board = board_mask
+    best_clears = 0
+    best_placed = 0
+    best_clearing_placements = 0
+    best_quality = -1
+    ordered_sample = np.empty(3, dtype=np.int32)
+
+    for permutation_index in range(FUTURE_SET_PERMUTATIONS.shape[0]):
+        for sample_position in range(3):
+            ordered_sample[sample_position] = sample[FUTURE_SET_PERMUTATIONS[permutation_index, sample_position]]
+
+        survived, resulting_board, clears, placed, clearing_placements = simulate_next_set_one_order_jit(
+            board_mask,
+            ordered_sample,
+            catalog_masks,
+            catalog_shapes,
+        )
+        if survived:
+            return True, resulting_board, clears, placed, clearing_placements
+
+        future_fits = count_future_piece_fits_jit(resulting_board)
+        quality = (
+            (placed * 1000000)
+            + (clears * 10000)
+            + (clearing_placements * 1000)
+            + future_fits
+        )
+        if quality > best_quality:
+            best_quality = quality
+            best_survived = survived
+            best_board = resulting_board
+            best_clears = clears
+            best_placed = placed
+            best_clearing_placements = clearing_placements
+
+    return best_survived, best_board, best_clears, best_placed, best_clearing_placements
+
+
+@njit(cache=True)
+def evaluate_monte_carlo_survival_jit(
+    board_mask: int,
+    sample_count: int,
+    seed: int = 0xC0FFEE,
+) -> Tuple[float, float, int, int, float]:
+    if sample_count <= 0:
+        return 0.0, 0.0, 0, 0, 0.0
+
     catalog_masks, catalog_shapes, _ = get_monte_carlo_piece_catalog()
-    samples = get_next_piece_samples(sample_count)
+    samples = get_next_piece_samples(sample_count, board_mask, seed)
     survived = 0
     total_clear_routes = 0
     total_future_fits = 0
@@ -595,6 +700,45 @@ def evaluate_monte_carlo_survival_jit(board_mask: int, sample_count: int) -> Tup
 
 
 @njit(cache=True)
+def candidate_ordering_score_jit(
+    board_mask: int,
+    clear_count: int,
+    streak_delta: float,
+    w_clear: float,
+    w_empty: float,
+    w_holes: float,
+    w_bumpiness: float,
+    w_readiness: float,
+    w_largest_region: float,
+    w_small_region_penalty: float,
+    w_line_readiness_survival: float,
+    w_trap_penalty: float,
+) -> float:
+    """Cheap intermediate score used only to explore promising branches first."""
+    empty_cells = 64 - popcount(board_mask)
+    holes = calculate_holes_jit(board_mask)
+    bumpiness = calculate_bumpiness_jit(board_mask)
+    readiness = check_readiness_jit(board_mask, empty_cells)
+    largest_region, small_regions, region_count = calculate_empty_regions_jit(board_mask)
+    line_readiness = calculate_line_readiness_survival_jit(board_mask)
+    traps = calculate_trap_penalty_jit(board_mask)
+    fragmentation_penalty = max(0, region_count - 1) * 20.0
+    return (
+        (clear_count * w_clear)
+        + streak_delta
+        + (w_empty * empty_cells)
+        + (w_holes * holes)
+        + (w_bumpiness * bumpiness)
+        + (w_readiness * readiness)
+        + (w_largest_region * largest_region)
+        + (w_small_region_penalty * small_regions)
+        + (w_line_readiness_survival * line_readiness)
+        + (w_trap_penalty * traps)
+        - fragmentation_penalty
+    )
+
+
+@njit(cache=False)
 def solve_recursive(board_mask: int,
                     depth: int,
                     max_depth: int,
@@ -620,6 +764,7 @@ def solve_recursive(board_mask: int,
                     danger_samples: int,
                     danger_filled_cells: int,
                     min_future_fits: int,
+                    monte_carlo_seed: int,
                     w_monte_carlo_survival: float,
                     w_monte_carlo_clear_routes: float,
                     w_monte_carlo_future_fits: float,
@@ -627,11 +772,19 @@ def solve_recursive(board_mask: int,
                     w_streak_continue: float,
                     w_streak_break_penalty: float,
                     w_streak_perfect_bonus: float,
-                    streak_in_plan: int) -> None:
+                    streak_in_plan: int,
+                    node_budget: int,
+                    nodes_visited_holder: np.ndarray,
+                    budget_exhausted_holder: np.ndarray) -> None:
     """
     Derinlemesine arama (backtracking) yapan recursive JIT fonksiyonu.
     Maksimum hız için sıfır dinamik bellek tahsisi ve bit düzeyinde durum takibi kullanır.
     """
+    if node_budget > 0 and nodes_visited_holder[0] >= node_budget:
+        budget_exhausted_holder[0] = True
+        return
+    nodes_visited_holder[0] += 1
+
     if depth == max_depth:
         score, next_survival_pct, clear_routes, mc_future_fits, sample_count, streak_continuity = evaluate_survival_score_jit(
             board_mask,
@@ -649,6 +802,7 @@ def solve_recursive(board_mask: int,
             danger_samples,
             danger_filled_cells,
             min_future_fits,
+            monte_carlo_seed,
             w_monte_carlo_survival,
             w_monte_carlo_clear_routes,
             w_monte_carlo_future_fits,
@@ -668,81 +822,125 @@ def solve_recursive(board_mask: int,
                 best_moves_global[d, 2] = current_moves[d, 2]
         return
 
+    candidate_slots = np.empty(192, dtype=np.int32)
+    candidate_rows = np.empty(192, dtype=np.int32)
+    candidate_cols = np.empty(192, dtype=np.int32)
+    candidate_boards = np.empty(192, dtype=np.int64)
+    candidate_clears = np.empty(192, dtype=np.int32)
+    candidate_streaks = np.empty(192, dtype=np.int32)
+    candidate_streak_deltas = np.empty(192, dtype=np.float64)
+    candidate_scores = np.empty(192, dtype=np.float64)
+    candidate_count = 0
     u_board = np.uint64(board_mask)
-    # 3 parçayı sırayla dene
-    for i in range(3):
-        if pieces_active[i]:
-            ph = pieces_shapes[i, 0]
-            pw = pieces_shapes[i, 1]
-            piece_mask = np.uint64(pieces_masks[i])
 
-            # Tahtada sığabilecek tüm koordinatları dene
-            for r in range(9 - ph):
-                for c in range(9 - pw):
-                    shift = np.uint64(r * 8 + c)
-                    shifted_piece = piece_mask << shift
-                    if (u_board & shifted_piece) == np.uint64(0):
-                        # Yerleştir (OR işlemi ile)
-                        new_board_mask = np.int64(board_mask) | np.int64(shifted_piece)
-                        
-                        # Dolan satır ve sütunları temizle
-                        cleared_rows = 0
-                        row_clear_mask = np.uint64(0)
-                        for row_offset in range(ph):
-                            row_idx = r + row_offset
-                            mask = np.uint64(0xFF) << np.uint64(row_idx * 8)
-                            if (np.uint64(new_board_mask) & mask) == mask:
-                                row_clear_mask |= mask
-                                cleared_rows += 1
+    for piece_index in range(3):
+        if not pieces_active[piece_index]:
+            continue
 
-                        cleared_cols = 0
-                        col_clear_mask = np.uint64(0)
-                        for col_offset in range(pw):
-                            col_idx = c + col_offset
-                            mask = np.uint64(0x0101010101010101) << np.uint64(col_idx)
-                            if (np.uint64(new_board_mask) & mask) == mask:
-                                col_clear_mask |= mask
-                                cleared_cols += 1
+        duplicate_active_piece = False
+        for previous_index in range(piece_index):
+            if (
+                pieces_active[previous_index]
+                and pieces_masks[previous_index] == pieces_masks[piece_index]
+                and pieces_shapes[previous_index, 0] == pieces_shapes[piece_index, 0]
+                and pieces_shapes[previous_index, 1] == pieces_shapes[piece_index, 1]
+            ):
+                duplicate_active_piece = True
+                break
+        if duplicate_active_piece:
+            continue
 
-                        if row_clear_mask != 0 or col_clear_mask != 0:
-                            new_board_mask = np.int64(np.uint64(new_board_mask) & ~(row_clear_mask | col_clear_mask))
+        piece_height = pieces_shapes[piece_index, 0]
+        piece_width = pieces_shapes[piece_index, 1]
+        piece_mask = np.uint64(pieces_masks[piece_index])
+        for row in range(9 - piece_height):
+            for col in range(9 - piece_width):
+                shifted_piece = piece_mask << np.uint64(row * 8 + col)
+                if (u_board & shifted_piece) != np.uint64(0):
+                    continue
 
-                        is_clearing = (cleared_rows + cleared_cols) > 0
-                        if is_clearing:
-                            new_streak = streak_in_plan + 1
-                            streak_delta = w_streak_continue
-                        else:
-                            new_streak = 0
-                            streak_delta = w_streak_break_penalty
-                        if depth + 1 == max_depth and new_streak == max_depth:
-                            streak_delta += w_streak_perfect_bonus
+                placed_board = np.int64(board_mask) | np.int64(shifted_piece)
+                new_board_mask, clear_count = clear_completed_lines_jit(
+                    placed_board,
+                    row,
+                    piece_height,
+                    col,
+                    piece_width,
+                )
+                if clear_count > 0:
+                    new_streak = streak_in_plan + 1
+                    streak_delta = w_streak_continue
+                else:
+                    new_streak = 0
+                    streak_delta = w_streak_break_penalty
+                if depth + 1 == max_depth and new_streak == max_depth:
+                    streak_delta += w_streak_perfect_bonus
 
-                        # Mevcut hamleyi kaydet
-                        current_moves[depth, 0] = i
-                        current_moves[depth, 1] = r
-                        current_moves[depth, 2] = c
+                ordering_score = candidate_ordering_score_jit(
+                    new_board_mask,
+                    clear_count,
+                    streak_delta,
+                    w_clear,
+                    w_empty,
+                    w_holes,
+                    w_bumpiness,
+                    w_readiness,
+                    w_largest_region,
+                    w_small_region_penalty,
+                    w_line_readiness_survival,
+                    w_trap_penalty,
+                )
+                insertion_index = candidate_count
+                while insertion_index > 0 and ordering_score > candidate_scores[insertion_index - 1]:
+                    candidate_slots[insertion_index] = candidate_slots[insertion_index - 1]
+                    candidate_rows[insertion_index] = candidate_rows[insertion_index - 1]
+                    candidate_cols[insertion_index] = candidate_cols[insertion_index - 1]
+                    candidate_boards[insertion_index] = candidate_boards[insertion_index - 1]
+                    candidate_clears[insertion_index] = candidate_clears[insertion_index - 1]
+                    candidate_streaks[insertion_index] = candidate_streaks[insertion_index - 1]
+                    candidate_streak_deltas[insertion_index] = candidate_streak_deltas[insertion_index - 1]
+                    candidate_scores[insertion_index] = candidate_scores[insertion_index - 1]
+                    insertion_index -= 1
 
-                        # Parçayı inaktif yap
-                        pieces_active[i] = False
-                        
-                        # Bir sonraki derinliğe geç (tamsayı kopyalandığı için backtrack zahmetsizdir)
-                        solve_recursive(
-                            new_board_mask, depth + 1, max_depth,
-                            pieces_masks, pieces_shapes, pieces_active,
-                            current_moves, best_moves_global, best_score_holder, best_diagnostics_holder,
-                            accumulated_score + ((cleared_rows + cleared_cols) * w_clear) + streak_delta,
-                            w_clear, w_empty, w_holes, w_bumpiness, w_readiness,
-                            w_future_fits, w_largest_region, w_small_region_penalty,
-                            w_line_readiness_survival, w_trap_penalty,
-                            normal_samples, danger_samples, danger_filled_cells, min_future_fits,
-                            w_monte_carlo_survival, w_monte_carlo_clear_routes, w_monte_carlo_future_fits,
-                            w_monte_carlo_streak,
-                            w_streak_continue, w_streak_break_penalty, w_streak_perfect_bonus,
-                            new_streak,
-                        )
+                candidate_slots[insertion_index] = piece_index
+                candidate_rows[insertion_index] = row
+                candidate_cols[insertion_index] = col
+                candidate_boards[insertion_index] = new_board_mask
+                candidate_clears[insertion_index] = clear_count
+                candidate_streaks[insertion_index] = new_streak
+                candidate_streak_deltas[insertion_index] = streak_delta
+                candidate_scores[insertion_index] = ordering_score
+                candidate_count += 1
 
-                        # Parçayı aktif yap (backtrack)
-                        pieces_active[i] = True
+    for candidate_index in range(candidate_count):
+        piece_index = candidate_slots[candidate_index]
+        current_moves[depth, 0] = piece_index
+        current_moves[depth, 1] = candidate_rows[candidate_index]
+        current_moves[depth, 2] = candidate_cols[candidate_index]
+        pieces_active[piece_index] = False
+
+        solve_recursive(
+            candidate_boards[candidate_index], depth + 1, max_depth,
+            pieces_masks, pieces_shapes, pieces_active,
+            current_moves, best_moves_global, best_score_holder, best_diagnostics_holder,
+            accumulated_score + (candidate_clears[candidate_index] * w_clear)
+            + candidate_streak_deltas[candidate_index],
+            w_clear, w_empty, w_holes, w_bumpiness, w_readiness,
+            w_future_fits, w_largest_region, w_small_region_penalty,
+            w_line_readiness_survival, w_trap_penalty,
+            normal_samples, danger_samples, danger_filled_cells, min_future_fits,
+            monte_carlo_seed,
+            w_monte_carlo_survival, w_monte_carlo_clear_routes, w_monte_carlo_future_fits,
+            w_monte_carlo_streak,
+            w_streak_continue, w_streak_break_penalty, w_streak_perfect_bonus,
+            candidate_streaks[candidate_index],
+            node_budget,
+            nodes_visited_holder,
+            budget_exhausted_holder,
+        )
+        pieces_active[piece_index] = True
+        if node_budget > 0 and budget_exhausted_holder[0]:
+            break
 
 
 def _diagnostics_from_holder(best_score: float, holder: np.ndarray) -> Dict[str, Any]:
@@ -774,12 +972,23 @@ def _diagnostics_from_holder(best_score: float, holder: np.ndarray) -> Dict[str,
     }
 
 
-def _solve_core(board: np.ndarray, active_pieces: List[Optional[np.ndarray]]) -> Tuple[Optional[List[Dict[str, Any]]], float, Dict[str, Any]]:
+def _solve_core(
+    board: np.ndarray,
+    active_pieces: List[Optional[np.ndarray]],
+    node_budget: Optional[int] = None,
+) -> Tuple[Optional[List[Dict[str, Any]]], float, Dict[str, Any]]:
     """
     Python tarafındaki sarmalayıcı (wrapper) arayüz.
     Numpy dizisi halindeki parçaları ve tahtayı bit maskelerine dönüştürür
     ve JIT çözücüyü başlatır.
     """
+    if board.shape != (8, 8):
+        raise ValueError("board must have shape (8, 8)")
+    if len(active_pieces) > 3:
+        raise ValueError("at most three active pieces are supported")
+    if not np.all((board == 0) | (board == 1)):
+        raise ValueError("board values must be binary")
+
     pieces_masks = np.zeros(3, dtype=np.uint64)
     pieces_shapes = np.zeros((3, 2), dtype=np.int32)
     pieces_active = np.zeros(3, dtype=bool)
@@ -790,7 +999,13 @@ def _solve_core(board: np.ndarray, active_pieces: List[Optional[np.ndarray]]) ->
     # Parçaları bit maskelerine dönüştürme
     for idx, matrix in enumerate(active_pieces):
         if matrix is not None:
+            if matrix.ndim != 2 or matrix.size == 0:
+                raise ValueError(f"piece {idx} must be a non-empty 2D matrix")
             ph, pw = matrix.shape
+            if ph > 8 or pw > 8:
+                raise ValueError(f"piece {idx} must fit within an 8x8 board")
+            if not np.all((matrix == 0) | (matrix == 1)) or not np.any(matrix == 1):
+                raise ValueError(f"piece {idx} must contain a non-empty binary shape")
             pieces_shapes[active_count, 0] = ph
             pieces_shapes[active_count, 1] = pw
             
@@ -812,6 +1027,9 @@ def _solve_core(board: np.ndarray, active_pieces: List[Optional[np.ndarray]]) ->
             "future_fits": 0,
             "sample_count": 0,
             "next_streak_pct": 0.0,
+            "search_nodes": 0,
+            "search_budget": 0,
+            "search_budget_exhausted": False,
         }
 
     # Tahtayı bit maskesine dönüştürme
@@ -825,6 +1043,9 @@ def _solve_core(board: np.ndarray, active_pieces: List[Optional[np.ndarray]]) ->
     best_moves_global = np.full((3, 3), -1, dtype=np.int32)
     best_score_holder = np.array([-1e9], dtype=np.float64)
     best_diagnostics_holder = np.zeros(5, dtype=np.float64)
+    effective_node_budget = config.SEARCH_NODE_BUDGET if node_budget is None else max(0, int(node_budget))
+    nodes_visited_holder = np.zeros(1, dtype=np.int64)
+    budget_exhausted_holder = np.zeros(1, dtype=np.bool_)
 
     # JIT arama motorunu çalıştır
     solve_recursive(
@@ -853,6 +1074,7 @@ def _solve_core(board: np.ndarray, active_pieces: List[Optional[np.ndarray]]) ->
         config.MONTE_CARLO_DANGER_SAMPLES,
         config.MONTE_CARLO_DANGER_FILLED_CELLS,
         config.MONTE_CARLO_MIN_FUTURE_FITS,
+        config.MONTE_CARLO_SEED,
         config.W_MONTE_CARLO_SURVIVAL,
         config.W_MONTE_CARLO_CLEAR_ROUTES,
         config.W_MONTE_CARLO_FUTURE_FITS,
@@ -861,10 +1083,18 @@ def _solve_core(board: np.ndarray, active_pieces: List[Optional[np.ndarray]]) ->
         config.W_STREAK_BREAK_PENALTY,
         config.W_STREAK_PERFECT_BONUS,
         0,  # initial streak_in_plan
+        effective_node_budget,
+        nodes_visited_holder,
+        budget_exhausted_holder,
     )
 
     best_score = best_score_holder[0]
     diagnostics = _diagnostics_from_holder(best_score, best_diagnostics_holder)
+    diagnostics.update({
+        "search_nodes": int(nodes_visited_holder[0]),
+        "search_budget": effective_node_budget,
+        "search_budget_exhausted": bool(budget_exhausted_holder[0]),
+    })
 
     # Hiçbir geçerli hamle bulunamadıysa (oyun bittiyse)
     if best_score < -1e8:
@@ -886,10 +1116,18 @@ def _solve_core(board: np.ndarray, active_pieces: List[Optional[np.ndarray]]) ->
     return moves, best_score, diagnostics
 
 
-def solve(board: np.ndarray, active_pieces: List[Optional[np.ndarray]]) -> Tuple[Optional[List[Dict[str, Any]]], float]:
-    moves, best_score, _ = _solve_core(board, active_pieces)
+def solve(
+    board: np.ndarray,
+    active_pieces: List[Optional[np.ndarray]],
+    node_budget: Optional[int] = None,
+) -> Tuple[Optional[List[Dict[str, Any]]], float]:
+    moves, best_score, _ = _solve_core(board, active_pieces, node_budget)
     return moves, best_score
 
 
-def solve_with_diagnostics(board: np.ndarray, active_pieces: List[Optional[np.ndarray]]) -> Tuple[Optional[List[Dict[str, Any]]], float, Dict[str, Any]]:
-    return _solve_core(board, active_pieces)
+def solve_with_diagnostics(
+    board: np.ndarray,
+    active_pieces: List[Optional[np.ndarray]],
+    node_budget: Optional[int] = None,
+) -> Tuple[Optional[List[Dict[str, Any]]], float, Dict[str, Any]]:
+    return _solve_core(board, active_pieces, node_budget)

@@ -1,7 +1,14 @@
+from typing import List, Optional, Tuple
+
 import cv2
 import numpy as np
-from typing import List, Optional, Tuple
-import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__))); import config
+
+from block_blast_solver import config
+
+UNIFORM_RANGE_THRESHOLD = 4.0
+UNIFORM_STD_THRESHOLD = 1.5
+UNIFORM_EMPTY_MAX_VALUE = 120.0
+MIN_OCCUPIED_BRIGHTNESS_GAP = 18.0
 
 # =====================================================================
 # BLOCK BLAST SOLVER - GÖRÜNTÜ İŞLEME VE DİJİTAL HALE GETİRME (vision.py)
@@ -10,19 +17,22 @@ import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__))); 
 def get_board_state(frame: np.ndarray) -> Tuple[np.ndarray, bool]:
     """
     BOARD_ROI koordinatlarını kullanarak 8x8 tahta durumunu okur.
-    Tema bağımsızlığı için doku varyansı (grayscale standart sapma) analizini kullanır.
+    Tema bağımsızlığı için HSV parlaklık kümelerini karşılaştırır.
     Döndürülen veri: (8x8 numpy dizisi (0=Boş, 1=Dolu), occlusion_flag)
     """
     if config.BOARD_ROI is None:
         return np.zeros((8, 8), dtype=np.uint8), False
 
     h, w, _ = frame.shape
+    valid_roi, _ = config.validate_roi(config.BOARD_ROI, "BOARD_ROI")
+    if not valid_roi:
+        return np.zeros((8, 8), dtype=np.uint8), True
     
     # ROI koordinatlarını piksel cinsine çevir
-    bx = int(config.BOARD_ROI[0] * w)
-    by = int(config.BOARD_ROI[1] * h)
-    bw = int(config.BOARD_ROI[2] * w)
-    bh = int(config.BOARD_ROI[3] * h)
+    bx = max(0, int(config.BOARD_ROI[0] * w))
+    by = max(0, int(config.BOARD_ROI[1] * h))
+    bw = min(w - bx, int(config.BOARD_ROI[2] * w))
+    bh = min(h - by, int(config.BOARD_ROI[3] * h))
 
     # Tahta görüntüsünü kes ve parlaklık kanalını çıkar
     board_crop = frame[by:by+bh, bx:bx+bw]
@@ -70,24 +80,30 @@ def get_board_state(frame: np.ndarray) -> Tuple[np.ndarray, bool]:
     value_range = float(np.max(values) - np.min(values))
     sorted_values = np.sort(values)
 
+    # A uniformly dark board is a valid empty-board state. A uniformly bright
+    # crop is more likely to be a dialog, hand, or incorrect ROI.
+    if value_range < UNIFORM_RANGE_THRESHOLD and float(np.std(values)) < UNIFORM_STD_THRESHOLD:
+        if float(np.median(values)) <= UNIFORM_EMPTY_MAX_VALUE:
+            return board_state, False
+        return board_state, True
+
     # Empty board cells are the darkest stable cluster. Some occupied green tiles are
-    # much dimmer than white tiles, so using the biggest brightness gap misses them.
-    empty_sample_count = max(8, min(18, len(sorted_values) // 4))
-    empty_values = sorted_values[:empty_sample_count]
-    empty_baseline = float(np.median(empty_values))
-    empty_noise = float(np.median(np.abs(empty_values - empty_baseline)))
-    threshold = empty_baseline + max(24.0, empty_noise * 3.0 + 12.0)
+    # much dimmer than white tiles, so prefer the first meaningful gap rather than
+    # the largest one. This also handles nearly full boards with very few empty cells.
+    gaps = np.diff(sorted_values)
+    meaningful_gaps = np.flatnonzero(gaps >= MIN_OCCUPIED_BRIGHTNESS_GAP)
+    if meaningful_gaps.size:
+        split_index = int(meaningful_gaps[0])
+        threshold = float((sorted_values[split_index] + sorted_values[split_index + 1]) * 0.5)
+    else:
+        empty_sample_count = max(4, min(12, len(sorted_values) // 8))
+        empty_values = sorted_values[:empty_sample_count]
+        empty_baseline = float(np.median(empty_values))
+        empty_noise = float(np.median(np.abs(empty_values - empty_baseline)))
+        threshold = empty_baseline + max(24.0, empty_noise * 3.0 + 12.0)
 
     for row, col, mean_value in cell_stats:
         board_state[row, col] = 1 if mean_value >= threshold else 0
-
-    # Occlusion (Engelleme/Kapanma) Kontrolü
-    # Eğer el veya başka bir nesne ekranı kapatırsa, tüm hücrelerin varyansı birbirine çok benzer
-    # veya aşırı yüksek/düşük olur.
-    # Eğer hücre varyanslarının standart sapması aşırı düşükse (yani tüm hücreler tek bir renk/el rengi olduysa)
-    # veya tahtanın %95'ten fazlası dolu görünüyor ve tüm hücrelerin varyansları sıfıra yakınsa occlusion kabul edilir.
-    if value_range < 4.0 and float(np.std(values)) < 1.5:
-        return board_state, True
 
     return board_state, False
 
@@ -200,12 +216,15 @@ def get_pieces(frame: np.ndarray, cell_w: float, cell_h: float) -> List[Optional
     pieces = [None, None, None]
     if config.PIECES_ROI is None or cell_w <= 0 or cell_h <= 0:
         return pieces
+    valid_roi, _ = config.validate_roi(config.PIECES_ROI, "PIECES_ROI")
+    if not valid_roi:
+        return pieces
 
     h, w, _ = frame.shape
-    px = int(config.PIECES_ROI[0] * w)
-    py = int(config.PIECES_ROI[1] * h)
-    pw = int(config.PIECES_ROI[2] * w)
-    ph = int(config.PIECES_ROI[3] * h)
+    px = max(0, int(config.PIECES_ROI[0] * w))
+    py = max(0, int(config.PIECES_ROI[1] * h))
+    pw = min(w - px, int(config.PIECES_ROI[2] * w))
+    ph = min(h - py, int(config.PIECES_ROI[3] * h))
 
     pieces_crop = frame[py:py+ph, px:px+pw]
     if pieces_crop.size == 0:

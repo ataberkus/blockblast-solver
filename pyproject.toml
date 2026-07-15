@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "block-blast-solver"
+version = "0.2.0"
+description = "Windows assistant for detecting and solving Block Blast boards"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Block Blast Solver contributors" }]
+dependencies = [
+    "numba==0.66.0",
+    "numpy==2.4.6",
+    "opencv-python==5.0.0.93",
+]
+
+[project.optional-dependencies]
+windows = [
+    "dxcam==0.3.0",
+    "PyGetWindow==0.0.9",
+]
+dev = [
+    "coverage==7.15.1",
+    "ruff==0.15.21",
+]
+
+[project.scripts]
+block-blast-solver = "block_blast_solver.main:main"
+
+[tool.setuptools.packages.find]
+include = ["block_blast_solver*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E9", "F", "I"]
+
+[tool.coverage.run]
+branch = true
+source = ["block_blast_solver"]
+omit = [
+    "block_blast_solver/main.py",
+    "block_blast_solver/modules/capture.py",
+    "block_blast_solver/modules/solver.py",
+]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
+skip_covered = true

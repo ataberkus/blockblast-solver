@@ -1,15 +1,9 @@
-import os
-import sys
 import unittest
 
 import numpy as np
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SOLVER_ROOT = os.path.join(ROOT, "block_blast_solver")
-if SOLVER_ROOT not in sys.path:
-    sys.path.insert(0, SOLVER_ROOT)
-
-from modules import solver
+from block_blast_solver.modules import solver
+from block_blast_solver.modules.visualizer import summarize_move_sequence
 
 
 def empty_board():
@@ -22,7 +16,6 @@ def piece(matrix):
 
 class SurvivalSolverTests(unittest.TestCase):
     def test_future_fit_score_rewards_open_board(self):
-        open_board = empty_board()
         constrained_board = np.ones((8, 8), dtype=np.uint8)
         constrained_board[0, 0] = 0
         constrained_board[7, 7] = 0
@@ -124,10 +117,11 @@ class SurvivalSolverTests(unittest.TestCase):
         moves, score = solver.solve(board, pieces)
 
         self.assertIsNotNone(moves)
-        self.assertEqual(moves[0]["slot_index"], 0)
-        self.assertEqual((moves[0]["row"], moves[0]["col"]), (6, 0))
-        self.assertEqual((moves[1]["row"], moves[1]["col"]), (0, 0))
-        self.assertEqual((moves[2]["row"], moves[2]["col"]), (3, 0))
+        outcomes, total_clears, final_filled = summarize_move_sequence(board, pieces, moves)
+        self.assertEqual({move["slot_index"] for move in moves}, {0, 1, 2})
+        self.assertEqual([outcome["clear_count"] for outcome in outcomes], [0, 0, 3])
+        self.assertEqual(total_clears, 3)
+        self.assertEqual(final_filled, 2)
         self.assertGreater(score, -1e8)
 
     def test_returns_none_when_no_legal_move_exists(self):
@@ -137,6 +131,16 @@ class SurvivalSolverTests(unittest.TestCase):
 
         self.assertIsNone(moves)
         self.assertLess(score, -1e8)
+
+    def test_rejects_invalid_board_and_piece_inputs(self):
+        with self.assertRaisesRegex(ValueError, "shape"):
+            solver.solve(np.zeros((7, 8), dtype=np.uint8), [piece([[1]])])
+        with self.assertRaisesRegex(ValueError, "binary"):
+            solver.solve(np.full((8, 8), 2, dtype=np.uint8), [piece([[1]])])
+        with self.assertRaisesRegex(ValueError, "non-empty binary"):
+            solver.solve(empty_board(), [np.zeros((1, 1), dtype=np.uint8)])
+        with self.assertRaisesRegex(ValueError, "at most three"):
+            solver.solve(empty_board(), [piece([[1]])] * 4)
 
 
 if __name__ == "__main__":

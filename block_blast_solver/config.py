@@ -1,5 +1,11 @@
-import os
 import json
+import logging
+import math
+import os
+from pathlib import Path
+from typing import Sequence, Tuple
+
+logger = logging.getLogger(__name__)
 
 # =====================================================================
 # BLOCK BLAST SOLVER - KONFİGÜRASYON VE PAYLAŞILAN DURUM MODÜLÜ (config.py)
@@ -7,11 +13,20 @@ import json
 
 # Pencere başlığı ve kalibrasyon dosya yolu tanımları
 WINDOW_TITLE = "LonelyScreen AirPlay Receiver"
-CALIBRATION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration_data.json")
 
-# Hücre tespiti için doku varyansı eşik değeri (Tile Variance Threshold)
-# Ahşap, mücevher vb. temalarda hücrelerin dolu/boş ayrımını yapmak için kullanılır.
-TILE_VARIANCE_THRESHOLD = 8.5
+
+def _default_calibration_file() -> Path:
+    override = os.environ.get("BLOCK_BLAST_CALIBRATION_FILE")
+    if override:
+        return Path(override).expanduser()
+    if os.name == "nt":
+        config_root = Path(os.environ.get("LOCALAPPDATA", Path.home()))
+    else:
+        config_root = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return config_root / "block-blast-solver" / "calibration_data.json"
+
+
+CALIBRATION_FILE = str(_default_calibration_file())
 
 # Envanter parçalarının tahta hücrelerine göre ölçek çarpanı
 PIECE_SCALE_FACTOR = 0.47
@@ -39,9 +54,14 @@ MONTE_CARLO_NORMAL_SAMPLES = 2
 MONTE_CARLO_DANGER_SAMPLES = 4
 MONTE_CARLO_DANGER_FILLED_CELLS = 38
 MONTE_CARLO_MIN_FUTURE_FITS = 8
+MONTE_CARLO_SEED = 0xC0FFEE
 W_MONTE_CARLO_SURVIVAL = 120.0
 W_MONTE_CARLO_CLEAR_ROUTES = 18.0
 W_MONTE_CARLO_FUTURE_FITS = 12.0
+
+# Deterministic recursion budget. Zero enables exhaustive search.
+# The default stays below the 250 ms warm-latency target on the benchmark fixture.
+SEARCH_NODE_BUDGET = 2500
 
 # Streak / combo continuity weights (Section 1 + Section 2 of streak spec)
 W_STREAK_CONTINUE        =  250.0   # per placement in current plan that clears >= 1 line
@@ -55,25 +75,70 @@ BOARD_ROI = None   # 8x8 Grid alanı [x_start_ratio, y_start_ratio, width_ratio,
 PIECES_ROI = None  # Alt kısımdaki 3 parça alanı [x_start_ratio, y_start_ratio, width_ratio, height_ratio]
 
 
-def save_calibration(board_roi, pieces_roi):
+def validate_roi(roi: object, name: str = "ROI") -> Tuple[bool, str]:
+    if not isinstance(roi, (list, tuple)) or len(roi) != 4:
+        return False, f"{name} must contain four normalized values"
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in roi):
+        return False, f"{name} values must be numbers"
+
+    x, y, width, height = (float(value) for value in roi)
+    if not all(math.isfinite(value) for value in (x, y, width, height)):
+        return False, f"{name} values must be finite"
+    if not (0.0 <= x < 1.0 and 0.0 <= y < 1.0):
+        return False, f"{name} origin must be inside the frame"
+    if not (0.0 < width <= 1.0 and 0.0 < height <= 1.0):
+        return False, f"{name} dimensions must be positive"
+    if x + width > 1.0 + 1e-9 or y + height > 1.0 + 1e-9:
+        return False, f"{name} must fit inside the frame"
+    return True, ""
+
+
+def validate_calibration(
+    board_roi: object,
+    pieces_roi: object,
+) -> Tuple[bool, str]:
+    for roi, name in ((board_roi, "BOARD_ROI"), (pieces_roi, "PIECES_ROI")):
+        valid, reason = validate_roi(roi, name)
+        if not valid:
+            return False, reason
+    return True, ""
+
+
+def _normalized_roi(roi: Sequence[float]) -> list[float]:
+    return [float(value) for value in roi]
+
+
+def save_calibration(board_roi: Sequence[float], pieces_roi: Sequence[float]) -> bool:
     """
     Kullanıcı tarafından seçilen ROI koordinat oranlarını JSON formatında diske kaydeder.
     Bu sayede uygulama her yeniden başlatıldığında kalibrasyon adımı atlanabilir.
     """
-    global BOARD_ROI, PIECES_ROI
-    BOARD_ROI = board_roi
-    PIECES_ROI = pieces_roi
+    valid, reason = validate_calibration(board_roi, pieces_roi)
+    if not valid:
+        logger.error("Calibration was not saved: %s", reason)
+        return False
 
     data = {
-        "BOARD_ROI": board_roi,
-        "PIECES_ROI": pieces_roi
+        "BOARD_ROI": _normalized_roi(board_roi),
+        "PIECES_ROI": _normalized_roi(pieces_roi),
     }
+    calibration_path = Path(CALIBRATION_FILE)
+    temporary_path = calibration_path.with_suffix(calibration_path.suffix + ".tmp")
     try:
-        with open(CALIBRATION_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4)
-        print(f"[BİLGİ] Kalibrasyon verileri başarıyla kaydedildi: {CALIBRATION_FILE}")
-    except Exception as e:
-        print(f"[HATA] Kalibrasyon verileri kaydedilemedi: {e}")
+        calibration_path.parent.mkdir(parents=True, exist_ok=True)
+        with temporary_path.open("w", encoding="utf-8") as calibration_handle:
+            json.dump(data, calibration_handle, indent=4)
+        temporary_path.replace(calibration_path)
+    except (OSError, TypeError, ValueError) as error:
+        temporary_path.unlink(missing_ok=True)
+        logger.error("Calibration could not be saved: %s", error)
+        return False
+
+    global BOARD_ROI, PIECES_ROI
+    BOARD_ROI = data["BOARD_ROI"]
+    PIECES_ROI = data["PIECES_ROI"]
+    logger.info("Calibration saved to %s", CALIBRATION_FILE)
+    return True
 
 
 def load_calibration():
@@ -82,17 +147,28 @@ def load_calibration():
     Dosya bulunamazsa veya hata oluşursa None döndürür.
     """
     global BOARD_ROI, PIECES_ROI
+    BOARD_ROI = None
+    PIECES_ROI = None
     if not os.path.exists(CALIBRATION_FILE):
-        print("[UYARI] Kalibrasyon dosyası bulunamadı. Yeni bir kalibrasyon gerekmektedir.")
+        logger.warning("Calibration file not found; calibration is required")
         return False
 
     try:
-        with open(CALIBRATION_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        BOARD_ROI = data.get("BOARD_ROI")
-        PIECES_ROI = data.get("PIECES_ROI")
-        print("[BİLGİ] Kalibrasyon verileri başarıyla yüklendi.")
-        return True
-    except Exception as e:
-        print(f"[HATA] Kalibrasyon verileri yüklenirken hata oluştu: {e}")
+        with open(CALIBRATION_FILE, "r", encoding="utf-8") as calibration_handle:
+            data = json.load(calibration_handle)
+        if not isinstance(data, dict):
+            raise ValueError("calibration root must be an object")
+
+        board_roi = data.get("BOARD_ROI")
+        pieces_roi = data.get("PIECES_ROI")
+        valid, reason = validate_calibration(board_roi, pieces_roi)
+        if not valid:
+            raise ValueError(reason)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as error:
+        logger.error("Calibration could not be loaded: %s", error)
         return False
+
+    BOARD_ROI = _normalized_roi(board_roi)
+    PIECES_ROI = _normalized_roi(pieces_roi)
+    logger.info("Calibration loaded")
+    return True
