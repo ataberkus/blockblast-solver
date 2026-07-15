@@ -3,7 +3,7 @@ import logging
 import math
 import os
 from pathlib import Path
-from typing import Optional, Sequence, Tuple
+from typing import Sequence, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +59,9 @@ W_MONTE_CARLO_SURVIVAL = 120.0
 W_MONTE_CARLO_CLEAR_ROUTES = 18.0
 W_MONTE_CARLO_FUTURE_FITS = 12.0
 
-# Deterministic recursion budget. Zero keeps exhaustive search enabled.
-SEARCH_NODE_BUDGET = 0
+# Deterministic recursion budget. Zero enables exhaustive search.
+# The default stays below the 250 ms warm-latency target on the benchmark fixture.
+SEARCH_NODE_BUDGET = 2500
 
 # Streak / combo continuity weights (Section 1 + Section 2 of streak spec)
 W_STREAK_CONTINUE        =  250.0   # per placement in current plan that clears >= 1 line

@@ -15,7 +15,6 @@ def piece(matrix):
 
 class SurvivalSolverTests(unittest.TestCase):
     def test_future_fit_score_rewards_open_board(self):
-        open_board = empty_board()
         constrained_board = np.ones((8, 8), dtype=np.uint8)
         constrained_board[0, 0] = 0
         constrained_board[7, 7] = 0

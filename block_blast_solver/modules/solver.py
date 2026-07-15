@@ -1,6 +1,7 @@
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 from numba import njit
-from typing import List, Optional, Tuple, Dict, Any
 
 from block_blast_solver import config
 
@@ -628,10 +629,12 @@ def simulate_next_set_survival_jit(board_mask: int,
             catalog_masks,
             catalog_shapes,
         )
+        if survived:
+            return True, resulting_board, clears, placed, clearing_placements
+
         future_fits = count_future_piece_fits_jit(resulting_board)
         quality = (
-            (1000000000 if survived else 0)
-            + (placed * 1000000)
+            (placed * 1000000)
             + (clears * 10000)
             + (clearing_placements * 1000)
             + future_fits

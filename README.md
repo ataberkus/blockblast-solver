@@ -66,7 +66,7 @@ Measure warm solver latency with:
 python scripts/benchmark_solver.py --iterations 10
 ```
 
-`SEARCH_NODE_BUDGET` in [`config.py`](block_blast_solver/config.py) can bound deterministic search work. Its default of `0` preserves exhaustive search.
+`SEARCH_NODE_BUDGET` in [`config.py`](block_blast_solver/config.py) bounds deterministic search work and returns the best completed result when exhausted. Set it to `0` for exhaustive search.
 
 ## Architecture
 

@@ -1,6 +1,7 @@
+from typing import List, Optional, Tuple
+
 import cv2
 import numpy as np
-from typing import List, Optional, Tuple
 
 from block_blast_solver import config
 

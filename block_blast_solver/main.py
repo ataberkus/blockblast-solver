@@ -1,7 +1,7 @@
-import cv2
 import logging
-import numpy as np
 import time
+
+import cv2
 
 from block_blast_solver import config
 from block_blast_solver.modules import solver, vision

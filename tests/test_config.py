@@ -6,7 +6,6 @@ from unittest import mock
 
 from block_blast_solver import config
 
-
 VALID_BOARD_ROI = [0.1, 0.1, 0.6, 0.6]
 VALID_PIECES_ROI = [0.1, 0.75, 0.8, 0.2]
 

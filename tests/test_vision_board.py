@@ -6,13 +6,12 @@ import numpy as np
 from block_blast_solver import config
 from block_blast_solver.modules import vision
 
-
 BOARD_ROI = [0.1, 0.1, 0.8, 0.8]
 
 
 def draw_board(filled_cells=(), empty_value=45, occupied_value=185):
     frame = np.full((400, 400, 3), 20, dtype=np.uint8)
-    x, y, width, height = 40, 40, 320, 320
+    x, y, width = 40, 40, 320
     cell_size = width // 8
     for row in range(8):
         for col in range(8):

@@ -1,6 +1,7 @@
 import ctypes
 import logging
 import sys
+import time
 from typing import Optional, Protocol, Tuple
 
 import cv2
@@ -249,7 +250,7 @@ class WindowCapture:
                     mon_idx = list(self.cameras.keys())[0]
                     ml, mt, mr, mb = self.monitor_rects[mon_idx]
                     self.window_handle.moveTo((ml + mr) // 4, (mt + mb) // 4)
-                    import time; time.sleep(0.5)
+                    time.sleep(0.5)
                     frame = self.capture_frame()
                 except Exception as error:
                     logger.error("Could not move window: %s", error)

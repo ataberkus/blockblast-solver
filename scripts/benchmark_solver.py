@@ -9,7 +9,7 @@ import numpy as np
 from block_blast_solver.modules import solver
 
 
-def benchmark(iterations: int, node_budget: int) -> list[float]:
+def benchmark(iterations: int, node_budget: int | None) -> list[float]:
     board = np.zeros((8, 8), dtype=np.uint8)
     board[0:4, 0:4] = 1
     board[6, 0:6] = 1
@@ -31,12 +31,13 @@ def benchmark(iterations: int, node_budget: int) -> list[float]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--iterations", type=int, default=10)
-    parser.add_argument("--node-budget", type=int, default=0)
+    parser.add_argument("--node-budget", type=int)
     args = parser.parse_args()
     if args.iterations < 1:
         parser.error("--iterations must be positive")
 
-    durations = benchmark(args.iterations, max(0, args.node_budget))
+    node_budget = max(0, args.node_budget) if args.node_budget is not None else None
+    durations = benchmark(args.iterations, node_budget)
     sorted_durations = sorted(durations)
     p95_index = min(len(sorted_durations) - 1, int(len(sorted_durations) * 0.95))
     print(
