@@ -787,6 +787,19 @@ def solve_recursive(board_mask: int,
     # 3 parçayı sırayla dene
     for i in range(3):
         if pieces_active[i]:
+            duplicate_active_piece = False
+            for previous_index in range(i):
+                if (
+                    pieces_active[previous_index]
+                    and pieces_masks[previous_index] == pieces_masks[i]
+                    and pieces_shapes[previous_index, 0] == pieces_shapes[i, 0]
+                    and pieces_shapes[previous_index, 1] == pieces_shapes[i, 1]
+                ):
+                    duplicate_active_piece = True
+                    break
+            if duplicate_active_piece:
+                continue
+
             ph = pieces_shapes[i, 0]
             pw = pieces_shapes[i, 1]
             piece_mask = np.uint64(pieces_masks[i])
