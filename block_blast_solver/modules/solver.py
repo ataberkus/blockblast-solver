@@ -700,6 +700,45 @@ def evaluate_monte_carlo_survival_jit(
 
 
 @njit(cache=True)
+def candidate_ordering_score_jit(
+    board_mask: int,
+    clear_count: int,
+    streak_delta: float,
+    w_clear: float,
+    w_empty: float,
+    w_holes: float,
+    w_bumpiness: float,
+    w_readiness: float,
+    w_largest_region: float,
+    w_small_region_penalty: float,
+    w_line_readiness_survival: float,
+    w_trap_penalty: float,
+) -> float:
+    """Cheap intermediate score used only to explore promising branches first."""
+    empty_cells = 64 - popcount(board_mask)
+    holes = calculate_holes_jit(board_mask)
+    bumpiness = calculate_bumpiness_jit(board_mask)
+    readiness = check_readiness_jit(board_mask, empty_cells)
+    largest_region, small_regions, region_count = calculate_empty_regions_jit(board_mask)
+    line_readiness = calculate_line_readiness_survival_jit(board_mask)
+    traps = calculate_trap_penalty_jit(board_mask)
+    fragmentation_penalty = max(0, region_count - 1) * 20.0
+    return (
+        (clear_count * w_clear)
+        + streak_delta
+        + (w_empty * empty_cells)
+        + (w_holes * holes)
+        + (w_bumpiness * bumpiness)
+        + (w_readiness * readiness)
+        + (w_largest_region * largest_region)
+        + (w_small_region_penalty * small_regions)
+        + (w_line_readiness_survival * line_readiness)
+        + (w_trap_penalty * traps)
+        - fragmentation_penalty
+    )
+
+
+@njit(cache=True)
 def solve_recursive(board_mask: int,
                     depth: int,
                     max_depth: int,
@@ -783,98 +822,125 @@ def solve_recursive(board_mask: int,
                 best_moves_global[d, 2] = current_moves[d, 2]
         return
 
+    candidate_slots = np.empty(192, dtype=np.int32)
+    candidate_rows = np.empty(192, dtype=np.int32)
+    candidate_cols = np.empty(192, dtype=np.int32)
+    candidate_boards = np.empty(192, dtype=np.int64)
+    candidate_clears = np.empty(192, dtype=np.int32)
+    candidate_streaks = np.empty(192, dtype=np.int32)
+    candidate_streak_deltas = np.empty(192, dtype=np.float64)
+    candidate_scores = np.empty(192, dtype=np.float64)
+    candidate_count = 0
     u_board = np.uint64(board_mask)
-    # 3 parçayı sırayla dene
-    for i in range(3):
-        if pieces_active[i]:
-            duplicate_active_piece = False
-            for previous_index in range(i):
-                if (
-                    pieces_active[previous_index]
-                    and pieces_masks[previous_index] == pieces_masks[i]
-                    and pieces_shapes[previous_index, 0] == pieces_shapes[i, 0]
-                    and pieces_shapes[previous_index, 1] == pieces_shapes[i, 1]
-                ):
-                    duplicate_active_piece = True
-                    break
-            if duplicate_active_piece:
-                continue
 
-            ph = pieces_shapes[i, 0]
-            pw = pieces_shapes[i, 1]
-            piece_mask = np.uint64(pieces_masks[i])
+    for piece_index in range(3):
+        if not pieces_active[piece_index]:
+            continue
 
-            # Tahtada sığabilecek tüm koordinatları dene
-            for r in range(9 - ph):
-                for c in range(9 - pw):
-                    shift = np.uint64(r * 8 + c)
-                    shifted_piece = piece_mask << shift
-                    if (u_board & shifted_piece) == np.uint64(0):
-                        # Yerleştir (OR işlemi ile)
-                        new_board_mask = np.int64(board_mask) | np.int64(shifted_piece)
-                        
-                        # Dolan satır ve sütunları temizle
-                        cleared_rows = 0
-                        row_clear_mask = np.uint64(0)
-                        for row_offset in range(ph):
-                            row_idx = r + row_offset
-                            mask = np.uint64(0xFF) << np.uint64(row_idx * 8)
-                            if (np.uint64(new_board_mask) & mask) == mask:
-                                row_clear_mask |= mask
-                                cleared_rows += 1
+        duplicate_active_piece = False
+        for previous_index in range(piece_index):
+            if (
+                pieces_active[previous_index]
+                and pieces_masks[previous_index] == pieces_masks[piece_index]
+                and pieces_shapes[previous_index, 0] == pieces_shapes[piece_index, 0]
+                and pieces_shapes[previous_index, 1] == pieces_shapes[piece_index, 1]
+            ):
+                duplicate_active_piece = True
+                break
+        if duplicate_active_piece:
+            continue
 
-                        cleared_cols = 0
-                        col_clear_mask = np.uint64(0)
-                        for col_offset in range(pw):
-                            col_idx = c + col_offset
-                            mask = np.uint64(0x0101010101010101) << np.uint64(col_idx)
-                            if (np.uint64(new_board_mask) & mask) == mask:
-                                col_clear_mask |= mask
-                                cleared_cols += 1
+        piece_height = pieces_shapes[piece_index, 0]
+        piece_width = pieces_shapes[piece_index, 1]
+        piece_mask = np.uint64(pieces_masks[piece_index])
+        for row in range(9 - piece_height):
+            for col in range(9 - piece_width):
+                shifted_piece = piece_mask << np.uint64(row * 8 + col)
+                if (u_board & shifted_piece) != np.uint64(0):
+                    continue
 
-                        if row_clear_mask != 0 or col_clear_mask != 0:
-                            new_board_mask = np.int64(np.uint64(new_board_mask) & ~(row_clear_mask | col_clear_mask))
+                placed_board = np.int64(board_mask) | np.int64(shifted_piece)
+                new_board_mask, clear_count = clear_completed_lines_jit(
+                    placed_board,
+                    row,
+                    piece_height,
+                    col,
+                    piece_width,
+                )
+                if clear_count > 0:
+                    new_streak = streak_in_plan + 1
+                    streak_delta = w_streak_continue
+                else:
+                    new_streak = 0
+                    streak_delta = w_streak_break_penalty
+                if depth + 1 == max_depth and new_streak == max_depth:
+                    streak_delta += w_streak_perfect_bonus
 
-                        is_clearing = (cleared_rows + cleared_cols) > 0
-                        if is_clearing:
-                            new_streak = streak_in_plan + 1
-                            streak_delta = w_streak_continue
-                        else:
-                            new_streak = 0
-                            streak_delta = w_streak_break_penalty
-                        if depth + 1 == max_depth and new_streak == max_depth:
-                            streak_delta += w_streak_perfect_bonus
+                ordering_score = candidate_ordering_score_jit(
+                    new_board_mask,
+                    clear_count,
+                    streak_delta,
+                    w_clear,
+                    w_empty,
+                    w_holes,
+                    w_bumpiness,
+                    w_readiness,
+                    w_largest_region,
+                    w_small_region_penalty,
+                    w_line_readiness_survival,
+                    w_trap_penalty,
+                )
+                insertion_index = candidate_count
+                while insertion_index > 0 and ordering_score > candidate_scores[insertion_index - 1]:
+                    candidate_slots[insertion_index] = candidate_slots[insertion_index - 1]
+                    candidate_rows[insertion_index] = candidate_rows[insertion_index - 1]
+                    candidate_cols[insertion_index] = candidate_cols[insertion_index - 1]
+                    candidate_boards[insertion_index] = candidate_boards[insertion_index - 1]
+                    candidate_clears[insertion_index] = candidate_clears[insertion_index - 1]
+                    candidate_streaks[insertion_index] = candidate_streaks[insertion_index - 1]
+                    candidate_streak_deltas[insertion_index] = candidate_streak_deltas[insertion_index - 1]
+                    candidate_scores[insertion_index] = candidate_scores[insertion_index - 1]
+                    insertion_index -= 1
 
-                        # Mevcut hamleyi kaydet
-                        current_moves[depth, 0] = i
-                        current_moves[depth, 1] = r
-                        current_moves[depth, 2] = c
+                candidate_slots[insertion_index] = piece_index
+                candidate_rows[insertion_index] = row
+                candidate_cols[insertion_index] = col
+                candidate_boards[insertion_index] = new_board_mask
+                candidate_clears[insertion_index] = clear_count
+                candidate_streaks[insertion_index] = new_streak
+                candidate_streak_deltas[insertion_index] = streak_delta
+                candidate_scores[insertion_index] = ordering_score
+                candidate_count += 1
 
-                        # Parçayı inaktif yap
-                        pieces_active[i] = False
-                        
-                        # Bir sonraki derinliğe geç (tamsayı kopyalandığı için backtrack zahmetsizdir)
-                        solve_recursive(
-                            new_board_mask, depth + 1, max_depth,
-                            pieces_masks, pieces_shapes, pieces_active,
-                            current_moves, best_moves_global, best_score_holder, best_diagnostics_holder,
-                            accumulated_score + ((cleared_rows + cleared_cols) * w_clear) + streak_delta,
-                            w_clear, w_empty, w_holes, w_bumpiness, w_readiness,
-                            w_future_fits, w_largest_region, w_small_region_penalty,
-                            w_line_readiness_survival, w_trap_penalty,
-                            normal_samples, danger_samples, danger_filled_cells, min_future_fits,
-                            monte_carlo_seed,
-                            w_monte_carlo_survival, w_monte_carlo_clear_routes, w_monte_carlo_future_fits,
-                            w_monte_carlo_streak,
-                            w_streak_continue, w_streak_break_penalty, w_streak_perfect_bonus,
-                            new_streak,
-                            node_budget,
-                            nodes_visited_holder,
-                            budget_exhausted_holder,
-                        )
+    for candidate_index in range(candidate_count):
+        piece_index = candidate_slots[candidate_index]
+        current_moves[depth, 0] = piece_index
+        current_moves[depth, 1] = candidate_rows[candidate_index]
+        current_moves[depth, 2] = candidate_cols[candidate_index]
+        pieces_active[piece_index] = False
 
-                        # Parçayı aktif yap (backtrack)
-                        pieces_active[i] = True
+        solve_recursive(
+            candidate_boards[candidate_index], depth + 1, max_depth,
+            pieces_masks, pieces_shapes, pieces_active,
+            current_moves, best_moves_global, best_score_holder, best_diagnostics_holder,
+            accumulated_score + (candidate_clears[candidate_index] * w_clear)
+            + candidate_streak_deltas[candidate_index],
+            w_clear, w_empty, w_holes, w_bumpiness, w_readiness,
+            w_future_fits, w_largest_region, w_small_region_penalty,
+            w_line_readiness_survival, w_trap_penalty,
+            normal_samples, danger_samples, danger_filled_cells, min_future_fits,
+            monte_carlo_seed,
+            w_monte_carlo_survival, w_monte_carlo_clear_routes, w_monte_carlo_future_fits,
+            w_monte_carlo_streak,
+            w_streak_continue, w_streak_break_penalty, w_streak_perfect_bonus,
+            candidate_streaks[candidate_index],
+            node_budget,
+            nodes_visited_holder,
+            budget_exhausted_holder,
+        )
+        pieces_active[piece_index] = True
+        if node_budget > 0 and budget_exhausted_holder[0]:
+            break
 
 
 def _diagnostics_from_holder(best_score: float, holder: np.ndarray) -> Dict[str, Any]:
