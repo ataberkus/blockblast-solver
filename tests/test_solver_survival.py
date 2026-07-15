@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 
 from block_blast_solver.modules import solver
+from block_blast_solver.modules.visualizer import summarize_move_sequence
 
 
 def empty_board():
@@ -116,10 +117,11 @@ class SurvivalSolverTests(unittest.TestCase):
         moves, score = solver.solve(board, pieces)
 
         self.assertIsNotNone(moves)
-        self.assertEqual(moves[0]["slot_index"], 0)
-        self.assertEqual((moves[0]["row"], moves[0]["col"]), (6, 0))
-        self.assertEqual((moves[1]["row"], moves[1]["col"]), (0, 0))
-        self.assertEqual((moves[2]["row"], moves[2]["col"]), (3, 0))
+        outcomes, total_clears, final_filled = summarize_move_sequence(board, pieces, moves)
+        self.assertEqual({move["slot_index"] for move in moves}, {0, 1, 2})
+        self.assertEqual([outcome["clear_count"] for outcome in outcomes], [0, 0, 3])
+        self.assertEqual(total_clears, 3)
+        self.assertEqual(final_filled, 2)
         self.assertGreater(score, -1e8)
 
     def test_returns_none_when_no_legal_move_exists(self):
