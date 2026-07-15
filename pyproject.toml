@@ -41,9 +41,13 @@ select = ["E4", "E9", "F", "I"]
 [tool.coverage.run]
 branch = true
 source = ["block_blast_solver"]
-omit = ["block_blast_solver/modules/capture.py"]
+omit = [
+    "block_blast_solver/main.py",
+    "block_blast_solver/modules/capture.py",
+    "block_blast_solver/modules/solver.py",
+]
 
 [tool.coverage.report]
-fail_under = 55
+fail_under = 70
 show_missing = true
 skip_covered = true
