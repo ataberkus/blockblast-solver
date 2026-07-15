@@ -738,7 +738,7 @@ def candidate_ordering_score_jit(
     )
 
 
-@njit(cache=True)
+@njit(cache=False)
 def solve_recursive(board_mask: int,
                     depth: int,
                     max_depth: int,
