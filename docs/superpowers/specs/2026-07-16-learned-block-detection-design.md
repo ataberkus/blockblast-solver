@@ -1,7 +1,7 @@
 # Learned Block Detection Design
 
 **Date:** 2026-07-16  
-**Status:** Pending written-spec review  
+**Status:** Approved — implementation plan next  
 **Scope:** Improve board and inventory block detection across themed skins (gem, cake, watermelon, wood, pearlescent, mixed-color pieces, etc.) using a learned detector, while keeping binary-only outputs and the existing 8×8 solver contract.
 
 ## Problem
