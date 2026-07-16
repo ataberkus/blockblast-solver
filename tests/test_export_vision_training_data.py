@@ -43,13 +43,16 @@ class ExportVisionTrainingDataTests(unittest.TestCase):
 
             self.assertEqual(manifest["board_cells_occupied"], 1)
             self.assertEqual(manifest["board_cells_empty"], 63)
-            self.assertEqual(manifest["inventory_pairs"], 1)
+            self.assertEqual(manifest["inventory_pairs"], 3)
             self.assertTrue((out_dir / "board_cells" / "occupied" / "tiny_r0_c0.png").exists())
             self.assertTrue((out_dir / "inventory" / "images" / "tiny_slot0.png").exists())
             self.assertTrue((out_dir / "inventory" / "masks" / "tiny_slot0.png").exists())
             mask = cv2.imread(str(out_dir / "inventory" / "masks" / "tiny_slot0.png"), cv2.IMREAD_GRAYSCALE)
             self.assertIsNotNone(mask)
             self.assertGreater(int(np.count_nonzero(mask)), 0)
+            empty_mask = cv2.imread(str(out_dir / "inventory" / "masks" / "tiny_slot1.png"), cv2.IMREAD_GRAYSCALE)
+            self.assertIsNotNone(empty_mask)
+            self.assertEqual(int(np.count_nonzero(empty_mask)), 0)
 
 
 if __name__ == "__main__":

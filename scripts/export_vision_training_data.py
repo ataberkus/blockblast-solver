@@ -61,7 +61,9 @@ def _rasterize_piece_mask(
     piece: np.ndarray,
     inv_cell_w: float,
     inv_cell_h: float,
+    slot_crop: np.ndarray | None = None,
 ) -> np.ndarray:
+    del slot_crop  # labels are rasterized on the same centered grid used by fixture generation
     slot_h, slot_w = slot_shape
     mask = np.zeros((slot_h, slot_w), dtype=np.uint8)
     rows, cols = piece.shape
@@ -98,14 +100,15 @@ def _export_inventory(fixture: SkinFixture, images_dir: Path, masks_dir: Path) -
     exported = 0
 
     for slot_index, piece in enumerate(fixture.pieces):
-        if piece is None:
-            continue
         slot_x1 = int(slot_index * slot_w)
         slot_x2 = int((slot_index + 1) * slot_w)
         slot_crop = pieces_crop[0:ph, slot_x1:slot_x2]
         if slot_crop.size == 0:
             continue
-        mask = _rasterize_piece_mask(slot_crop.shape[:2], piece, inv_cell_w, inv_cell_h)
+        if piece is None:
+            mask = np.zeros(slot_crop.shape[:2], dtype=np.uint8)
+        else:
+            mask = _rasterize_piece_mask(slot_crop.shape[:2], piece, inv_cell_w, inv_cell_h, slot_crop)
         stem = f"{fixture.name}_slot{slot_index}"
         cv2.imwrite(str(images_dir / f"{stem}.png"), slot_crop)
         cv2.imwrite(str(masks_dir / f"{stem}.png"), mask)

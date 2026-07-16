@@ -13,6 +13,7 @@ htmlcov/
 block_blast_solver/calibration_data.json
 mock_hud_output.png
 datasets/
+block_blast_solver/models/.staging/
 
 # Local tooling
 .mcp.json

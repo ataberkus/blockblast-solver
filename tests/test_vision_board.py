@@ -1,3 +1,4 @@
+import os
 import unittest
 
 import cv2
@@ -82,6 +83,10 @@ class VisionBoardTests(unittest.TestCase):
         self.assertEqual(int(board[empty_cell]), 0)
 
     def test_uniform_bright_crop_is_occluded(self):
+        os.environ["VISION_FORCE_HEURISTIC"] = "1"
+        self.addCleanup(os.environ.pop, "VISION_FORCE_HEURISTIC", None)
+        vision_models.ModelRegistry.reset_for_tests()
+
         board, occluded = vision.get_board_state(draw_board(empty_value=210))
 
         self.assertTrue(occluded)

@@ -1,3 +1,4 @@
+import os
 import unittest
 
 import cv2
@@ -70,7 +71,13 @@ class VisionPieceTests(unittest.TestCase):
     def tearDown(self):
         config.PIECES_ROI = self.previous_roi
 
+    def _force_heuristic(self):
+        os.environ["VISION_FORCE_HEURISTIC"] = "1"
+        self.addCleanup(os.environ.pop, "VISION_FORCE_HEURISTIC", None)
+        vision_models.ModelRegistry.reset_for_tests()
+
     def test_detects_l_pieces_without_expanding_to_phantom_cells(self):
+        self._force_heuristic()
         shapes = [
             np.array([[0, 0, 1], [1, 1, 1]], dtype=np.uint8),
             np.array([[1, 0, 0], [1, 1, 1]], dtype=np.uint8),
@@ -83,6 +90,7 @@ class VisionPieceTests(unittest.TestCase):
         self.assertEqual([piece.tolist() for piece in detected], [shape.tolist() for shape in shapes])
 
     def test_detects_square_and_one_wide_line_pieces(self):
+        self._force_heuristic()
         shapes = [
             np.array([[1, 1], [1, 1]], dtype=np.uint8),
             np.array([[1, 1, 1, 1]], dtype=np.uint8),
@@ -95,6 +103,7 @@ class VisionPieceTests(unittest.TestCase):
         self.assertEqual([piece.tolist() for piece in detected], [shape.tolist() for shape in shapes])
 
     def test_detects_five_wide_line_when_inventory_blocks_are_smaller_than_board_scale(self):
+        self._force_heuristic()
         shapes = [
             np.array([[1, 1, 1, 1, 1]], dtype=np.uint8),
             np.array([[1, 1, 1, 1, 1]], dtype=np.uint8),
@@ -107,6 +116,7 @@ class VisionPieceTests(unittest.TestCase):
         self.assertEqual([piece.tolist() for piece in detected], [shape.tolist() for shape in shapes])
 
     def test_detects_vertical_line_without_counting_drop_shadow_as_column(self):
+        self._force_heuristic()
         frame_h = 320
         frame_w = 480
         roi_x = 60

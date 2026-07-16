@@ -20,6 +20,11 @@ and `CONTRIBUTING.md` for the full workflow.
 - The `windows` extra (`dxcam`, `PyGetWindow`) is intentionally NOT installed:
   those packages are Windows-only and their imports are kept lazy so the rest of
   the package runs headless on Linux. Do not add them here.
+- Runtime vision depends on `onnxruntime` and the committed weights under
+  `block_blast_solver/models/`. PyTorch is only needed for the optional
+  `train` extra when regenerating those weights. Skin fixtures live in
+  `tests/fixtures/vision_skins/`. Set `VISION_FORCE_HEURISTIC=1` to force the
+  classical detector path.
 
 ### Lint / test / build
 

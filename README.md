@@ -6,6 +6,7 @@ A Windows desktop assistant that reads a mirrored Block Blast game, detects the 
 
 - Low-latency, multi-monitor window capture through `dxcam`
 - OpenCV board and inventory detection with stable-frame filtering
+- ONNX board-cell classifier and inventory-slot masker for themed / multi-color skins (heuristic fallback if weights are missing)
 - Numba-accelerated bitboard search
 - Combo, board-survival, and deterministic future-set evaluation
 - HUD diagnostics for risk, survival, clear routes, and move order
@@ -61,6 +62,17 @@ coverage report
 coverage report --omit=block_blast_solver/modules/solver.py --fail-under=70
 ```
 
+Runtime vision uses `onnxruntime` (declared in the base dependencies). To retrain the committed ONNX weights:
+
+```bash
+python -m pip install -e ".[dev,train]"
+python scripts/generate_vision_skin_fixtures.py
+python scripts/export_vision_training_data.py --out datasets/vision
+python scripts/train_vision_models.py --data datasets/vision --out-dir block_blast_solver/models
+```
+
+Set `VISION_FORCE_HEURISTIC=1` to bypass the learned models and use the classical OpenCV path.
+
 Measure warm solver latency with:
 
 ```bash
@@ -72,7 +84,7 @@ python scripts/benchmark_solver.py --iterations 10
 ## Architecture
 
 1. `capture.py` captures the target window and maps calibrated regions.
-2. `vision.py` detects the 8×8 board and three inventory pieces.
+2. `vision.py` detects the 8×8 board and three inventory pieces (ONNX models when available, heuristics otherwise).
 3. `state.py` waits for consecutive matching detections.
 4. `solver.py` searches current moves and evaluates representative future sets.
 5. `visualizer.py` renders move overlays and diagnostics.

@@ -30,7 +30,7 @@ coverage report --omit=block_blast_solver/modules/solver.py --fail-under=70
 `@njit` bodies are mostly untraceable. The 70% gate therefore omits the solver
 module and relies on the behavioral solver tests for that path.
 
-Solver changes should include deterministic regression cases. Vision changes should include synthetic images or sanitized fixtures that exercise the affected theme, brightness, scale, or occlusion condition.
+Solver changes should include deterministic regression cases. Vision changes should include synthetic images or sanitized fixtures that exercise the affected theme, brightness, scale, or occlusion condition. Learned-vision weight changes should keep `tests/test_vision_skins.py` green; retrain with `pip install -e ".[dev,train]"` plus the scripts under `scripts/` documented in `README.md`.
 
 ## Windows manual checks
 
