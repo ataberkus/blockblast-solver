@@ -171,3 +171,71 @@ TOTAL                                             745     85    250     48    86
   package index exposed in this environment. The pin remains declared verbatim,
   but dependency installation is blocked until that artifact becomes available or
   the brief is corrected.
+
+## Follow-up: review fixes on 2026-07-16
+
+- changed the dependency pin from `onnxruntime==1.27.1` to
+  `onnxruntime==1.27.0` in both `pyproject.toml` and `requirements.txt`
+- reran ` .venv/bin/python -m pip install -e ".[dev]" ` successfully
+- confirmed `import onnxruntime` works and reports version `1.27.0`
+- tightened `vision_models.ModelRegistry` fallback logging to emit a single
+  warning per process-wide fallback state instead of one warning per missing
+  file
+- updated `ModelRegistry.reset_for_tests()` to clear the logged-failure
+  tracking set so warning assertions stay deterministic across tests
+
+### Follow-up verification
+
+Command:
+
+` .venv/bin/python -m unittest tests.test_vision_models -v `
+
+Output summary:
+
+```text
+Ran 6 tests in 0.003s
+
+OK
+```
+
+Command:
+
+` .venv/bin/python -m pip install -e ".[dev]" `
+
+Output summary:
+
+```text
+Successfully installed ... onnxruntime-1.27.0 ...
+```
+
+Command:
+
+` .venv/bin/python -c "import onnxruntime; print(onnxruntime.__version__)" `
+
+Output:
+
+```text
+1.27.0
+```
+
+Command:
+
+` .venv/bin/coverage run -m unittest discover -s tests -v `
+
+Output summary:
+
+```text
+Ran 68 tests in 6.434s
+
+OK
+```
+
+Command:
+
+` .venv/bin/coverage report --omit=block_blast_solver/modules/solver.py --fail-under=70 `
+
+Output summary:
+
+```text
+TOTAL                                             747     84    250     47    86%
+```

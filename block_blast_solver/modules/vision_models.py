@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_BOARD_MODEL = config.BOARD_CELL_MODEL_PATH
 DEFAULT_MASK_MODEL = config.INVENTORY_MASK_MODEL_PATH
 
+_FALLBACK_WARNING_KEY = "vision-model-fallback"
 _LOGGED_FAILURE_KEYS: set[str] = set()
 
 
@@ -50,7 +51,7 @@ def _load_onnxruntime() -> Any | None:
     try:
         import onnxruntime as ort
     except Exception as error:  # pragma: no cover - exercised only when dependency import fails.
-        _log_model_failure_once("onnxruntime-import", "ONNX runtime unavailable; using heuristics instead: %s", error)
+        _log_model_failure_once(_FALLBACK_WARNING_KEY, "ONNX runtime unavailable; using heuristics instead: %s", error)
         return None
     return ort
 
@@ -58,7 +59,7 @@ def _load_onnxruntime() -> Any | None:
 def _load_session(model_path: str, label: str) -> Any | None:
     path = Path(model_path)
     if not path.is_file():
-        _log_model_failure_once(f"missing:{path}", "Missing %s weights at %s; using heuristics instead", label, path)
+        _log_model_failure_once(_FALLBACK_WARNING_KEY, "Missing %s weights at %s; using heuristics instead", label, path)
         return None
 
     ort = _load_onnxruntime()
@@ -68,7 +69,7 @@ def _load_session(model_path: str, label: str) -> Any | None:
     try:
         return ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
     except Exception as error:  # pragma: no cover - depends on invalid or incompatible model files.
-        _log_model_failure_once(f"session:{path}", "Failed to load %s weights at %s: %s", label, path, error)
+        _log_model_failure_once(_FALLBACK_WARNING_KEY, "Failed to load %s weights at %s: %s", label, path, error)
         return None
 
 
@@ -139,3 +140,4 @@ class ModelRegistry:
     @classmethod
     def reset_for_tests(cls) -> None:
         cls._instance = None
+        _LOGGED_FAILURE_KEYS.clear()

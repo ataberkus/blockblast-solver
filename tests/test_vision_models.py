@@ -67,7 +67,27 @@ class VisionModelsTests(unittest.TestCase):
         self.assertFalse(registry.using_learned)
         self.assertIsNone(registry.board_classifier)
         self.assertIsNone(registry.inventory_masker)
-        self.assertEqual(len(captured.output), 2)
+        self.assertEqual(len(captured.output), 1)
+        self.assertIn("using heuristics instead", captured.output[0])
+
+    def test_reset_for_tests_clears_fallback_warning_tracking(self):
+        with mock.patch.object(vision_models, "DEFAULT_BOARD_MODEL", "/no/such/board.onnx"), mock.patch.object(
+            vision_models, "DEFAULT_MASK_MODEL", "/no/such/mask.onnx"
+        ):
+            with self.assertLogs(vision_models.logger, level="WARNING") as first:
+                registry = vision_models.ModelRegistry.get()
+
+            self.assertFalse(registry.using_learned)
+            self.assertIsNone(registry.board_classifier)
+            self.assertIsNone(registry.inventory_masker)
+            self.assertEqual(len(first.output), 1)
+
+            vision_models.ModelRegistry.reset_for_tests()
+
+            with self.assertLogs(vision_models.logger, level="WARNING") as second:
+                vision_models.ModelRegistry.get()
+
+        self.assertEqual(len(second.output), 1)
 
     def test_occlusion_helper_flags_uncertain_board(self):
         probs = np.full((8, 8), 0.5, dtype=np.float32)
