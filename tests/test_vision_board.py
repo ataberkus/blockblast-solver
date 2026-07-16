@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 from block_blast_solver import config
-from block_blast_solver.modules import vision
+from block_blast_solver.modules import vision, vision_models
 
 BOARD_ROI = [0.1, 0.1, 0.8, 0.8]
 
@@ -41,6 +41,35 @@ class VisionBoardTests(unittest.TestCase):
         board, occluded = vision.get_board_state(draw_board(expected_cells))
 
         self.assertFalse(occluded)
+        self.assertEqual({tuple(cell) for cell in np.argwhere(board == 1)}, expected_cells)
+
+    def test_learned_path_uses_classifier_probabilities(self):
+        if config.vision_force_heuristic():
+            self.skipTest("learned board path is disabled when heuristics are forced")
+
+        class FakeClassifier:
+            def __init__(self, filled_cells):
+                self._filled_cells = filled_cells
+                self.calls = 0
+
+            def predict_proba(self, crop_bgr):
+                row, col = divmod(self.calls, 8)
+                self.calls += 1
+                return 0.95 if (row, col) in self._filled_cells else 0.05
+
+        expected_cells = {(0, 0), (3, 4), (7, 7)}
+        classifier = FakeClassifier(expected_cells)
+        self.addCleanup(vision_models.ModelRegistry.reset_for_tests)
+        registry = vision_models.ModelRegistry(None, None)
+        registry.board_classifier = classifier
+        registry.inventory_masker = None
+        registry.using_learned = True
+        vision_models.ModelRegistry._instance = registry
+
+        board, occluded = vision.get_board_state(draw_board())
+
+        self.assertFalse(occluded)
+        self.assertEqual(classifier.calls, 64)
         self.assertEqual({tuple(cell) for cell in np.argwhere(board == 1)}, expected_cells)
 
     def test_detects_single_empty_cell_on_nearly_full_board(self):

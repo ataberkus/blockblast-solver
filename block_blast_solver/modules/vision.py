@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 
 from block_blast_solver import config
+from block_blast_solver.modules import vision_models
 
 UNIFORM_RANGE_THRESHOLD = 4.0
 UNIFORM_STD_THRESHOLD = 1.5
@@ -14,7 +15,7 @@ MIN_OCCUPIED_BRIGHTNESS_GAP = 18.0
 # BLOCK BLAST SOLVER - GÖRÜNTÜ İŞLEME VE DİJİTAL HALE GETİRME (vision.py)
 # =====================================================================
 
-def get_board_state(frame: np.ndarray) -> Tuple[np.ndarray, bool]:
+def _get_board_state_heuristic(frame: np.ndarray) -> Tuple[np.ndarray, bool]:
     """
     BOARD_ROI koordinatlarını kullanarak 8x8 tahta durumunu okur.
     Tema bağımsızlığı için HSV parlaklık kümelerini karşılaştırır.
@@ -105,6 +106,69 @@ def get_board_state(frame: np.ndarray) -> Tuple[np.ndarray, bool]:
     for row, col, mean_value in cell_stats:
         board_state[row, col] = 1 if mean_value >= threshold else 0
 
+    return board_state, False
+
+
+def get_board_state(frame: np.ndarray) -> Tuple[np.ndarray, bool]:
+    if config.vision_force_heuristic():
+        return _get_board_state_heuristic(frame)
+
+    registry = vision_models.ModelRegistry.get()
+    classifier = registry.board_classifier
+    if classifier is None:
+        return _get_board_state_heuristic(frame)
+
+    if config.BOARD_ROI is None:
+        return np.zeros((8, 8), dtype=np.uint8), False
+
+    try:
+        h, w, _ = frame.shape
+        valid_roi, _ = config.validate_roi(config.BOARD_ROI, "BOARD_ROI")
+        if not valid_roi:
+            return np.zeros((8, 8), dtype=np.uint8), True
+
+        bx = max(0, int(config.BOARD_ROI[0] * w))
+        by = max(0, int(config.BOARD_ROI[1] * h))
+        bw = min(w - bx, int(config.BOARD_ROI[2] * w))
+        bh = min(h - by, int(config.BOARD_ROI[3] * h))
+
+        board_crop = frame[by:by + bh, bx:bx + bw]
+        if board_crop.size == 0:
+            return np.zeros((8, 8), dtype=np.uint8), True
+
+        cell_w = bw / 8.0
+        cell_h = bh / 8.0
+        probs = np.zeros((8, 8), dtype=np.float32)
+
+        for row in range(8):
+            for col in range(8):
+                c_x1 = int(col * cell_w)
+                c_y1 = int(row * cell_h)
+                c_w = int(cell_w)
+                c_h = int(cell_h)
+
+                offset_x = int(c_w * 0.20)
+                offset_y = int(c_h * 0.20)
+                inner_w = int(c_w * 0.60)
+                inner_h = int(c_h * 0.60)
+                if inner_w <= 0 or inner_h <= 0:
+                    raise ValueError("board cell inner crop is empty")
+
+                cell_inner = board_crop[
+                    c_y1 + offset_y:c_y1 + offset_y + inner_h,
+                    c_x1 + offset_x:c_x1 + offset_x + inner_w,
+                ]
+                if cell_inner.size == 0:
+                    raise ValueError("board cell crop is empty")
+
+                probs[row, col] = classifier.predict_proba(cell_inner)
+    except Exception:
+        return np.zeros((8, 8), dtype=np.uint8), True
+
+    if vision_models.board_probs_are_occluded(probs):
+        return np.zeros((8, 8), dtype=np.uint8), True
+
+    board_state = (probs >= config.T_BOARD).astype(np.uint8)
     return board_state, False
 
 
