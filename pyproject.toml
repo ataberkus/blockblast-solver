@@ -48,7 +48,8 @@ omit = [
 ]
 
 [tool.coverage.report]
-# solver.py is measured; keep the gate at the highest currently passing rounded total.
-fail_under = 51
+# solver.py is measured for visibility, but Numba @njit bodies are mostly
+# untraceable. The 70% gate is enforced in CI / CONTRIBUTING by re-reporting
+# with --omit=block_blast_solver/modules/solver.py --fail-under=70.
 show_missing = true
 skip_covered = true

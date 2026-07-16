@@ -43,7 +43,9 @@ jobs:
       - name: Test
         run: coverage run -m unittest discover -s tests -v
       - name: Coverage
-        run: coverage report
+        run: |
+          coverage report
+          coverage report --omit=block_blast_solver/modules/solver.py --fail-under=70
       - name: Windows capture import smoke test
         if: runner.os == 'Windows'
         run: python -c "from block_blast_solver.modules.capture import WindowCapture"

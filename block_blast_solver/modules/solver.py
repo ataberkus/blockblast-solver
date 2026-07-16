@@ -322,6 +322,7 @@ def get_next_piece_samples(sample_count: int, board_mask: int = 0, seed: int = 0
 
 @njit(cache=True)
 def get_future_piece_masks() -> Tuple[np.ndarray, np.ndarray]:
+    # Intentional 16-orientation subset for cheap fit counts (see MC catalog note).
     masks = np.zeros(16, dtype=np.uint64)
     shapes = np.zeros((16, 2), dtype=np.int32)
 
