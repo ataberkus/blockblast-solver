@@ -23,3 +23,6 @@ docs/superpowers/
 .venv/
 venv/
 env/
+
+# Agent scratch
+.superpowers/
