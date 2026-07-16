@@ -220,3 +220,57 @@ TOTAL                                             638     51    230     44    89
 None. The one notable constraint is intentional and documented: the fixture
 images are synthetic stand-ins because the brainstorm screenshots were not
 available as binary files.
+
+## Review follow-up: schema hardening
+
+- `validate_skin_label()` now validates `board_roi` and `pieces_roi` with the
+  shared normalized-ROI rules from `config.validate_roi`, so out-of-range,
+  non-finite, non-positive, and frame-overflow ROIs raise `ValueError`.
+- Piece validation now rejects non-list rows before reading `piece[0]`, so
+  malformed matrices such as `pieces=[[1], None, None]` raise `ValueError`
+  instead of escaping as `TypeError`.
+- `docs/superpowers/specs/2026-07-16-learned-block-detection-design.md` was
+  already marked `Approved`, so no spec status change was needed.
+
+### RED: new regression cases before fix
+
+Command:
+
+` .venv/bin/python -m unittest tests.test_vision_fixture_schema -v `
+
+Output summary:
+
+```text
+test_validate_rejects_malformed_piece_matrix_with_value_error ... ERROR
+TypeError: object of type 'int' has no len()
+test_validate_rejects_out_of_range_roi ... FAIL
+AssertionError: ValueError not raised
+```
+
+### GREEN: targeted schema suite after fix
+
+Command:
+
+` .venv/bin/python -m unittest tests.test_vision_fixture_schema -v `
+
+Output summary:
+
+```text
+Ran 6 tests in 0.050s
+
+OK
+```
+
+### GREEN: full suite after fix
+
+Command:
+
+` .venv/bin/coverage run -m unittest discover -s tests -v `
+
+Output summary:
+
+```text
+Ran 62 tests in 6.841s
+
+OK
+```

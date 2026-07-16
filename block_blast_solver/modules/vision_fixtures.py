@@ -8,6 +8,8 @@ from typing import Iterator, List, Optional
 import cv2
 import numpy as np
 
+from block_blast_solver import config
+
 DEFAULT_FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "vision_skins"
 
 
@@ -31,10 +33,9 @@ def validate_skin_label(data: object) -> None:
             raise ValueError(f"missing key: {key}")
     for roi_key in ("board_roi", "pieces_roi"):
         roi = data[roi_key]
-        if not isinstance(roi, list) or len(roi) != 4:
-            raise ValueError(f"{roi_key} must be 4 floats")
-        if any(not isinstance(value, (int, float)) or isinstance(value, bool) for value in roi):
-            raise ValueError(f"{roi_key} values must be numbers")
+        valid, reason = config.validate_roi(roi, roi_key)
+        if not valid:
+            raise ValueError(reason)
     board = data["board"]
     if not isinstance(board, list) or len(board) != 8:
         raise ValueError("board must be 8 rows")
@@ -51,6 +52,8 @@ def validate_skin_label(data: object) -> None:
             continue
         if not isinstance(piece, list) or not piece:
             raise ValueError("piece matrix must be a non-empty 2D list")
+        if any(not isinstance(row, list) for row in piece):
+            raise ValueError("piece matrix rows must be lists")
         width = len(piece[0])
         if width < 1:
             raise ValueError("piece matrix has empty row")

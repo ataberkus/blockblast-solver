@@ -49,6 +49,26 @@ class VisionFixtureSchemaTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_skin_label(label)
 
+    def test_validate_rejects_out_of_range_roi(self):
+        label = {
+            "board_roi": [0.95, 0.2, 0.1, 0.5],
+            "pieces_roi": [0.1, 0.75, 0.8, 0.2],
+            "board": [[0] * 8 for _ in range(8)],
+            "pieces": [None, None, None],
+        }
+        with self.assertRaises(ValueError):
+            validate_skin_label(label)
+
+    def test_validate_rejects_malformed_piece_matrix_with_value_error(self):
+        label = {
+            "board_roi": [0.1, 0.2, 0.8, 0.5],
+            "pieces_roi": [0.1, 0.75, 0.8, 0.2],
+            "board": [[0] * 8 for _ in range(8)],
+            "pieces": [[1], None, None],
+        }
+        with self.assertRaises(ValueError):
+            validate_skin_label(label)
+
     def test_load_skin_fixture_round_trip(self):
         import cv2
 
