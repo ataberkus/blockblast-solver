@@ -231,6 +231,9 @@ def calculate_line_readiness_survival_jit(board_mask: int) -> int:
 @njit(cache=True)
 def get_monte_carlo_piece_catalog() -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return unique piece orientations used by future-set sampling."""
+    # Monte Carlo uses 25 orientations with family-equal weights.
+    # Future-fit scoring uses a smaller representative 16-orientation subset
+    # for cheaper readiness counts; the catalogs do not need to match.
     masks = np.zeros(25, dtype=np.uint64)
     shapes = np.zeros((25, 2), dtype=np.int32)
     families = np.zeros(25, dtype=np.int32)

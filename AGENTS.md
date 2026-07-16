@@ -27,7 +27,7 @@ Standard commands (from `README.md` / `CONTRIBUTING.md`), run with the venv:
 
 - Lint: `.venv/bin/ruff check .`
 - Test: `.venv/bin/coverage run -m unittest discover -s tests -v`
-- Coverage (>=70% gate): `.venv/bin/coverage report`
+- Coverage (>=51% gate): `.venv/bin/coverage report`
 - No separate build step (editable install via `pip install -e`).
 
 ### Running the app

@@ -320,6 +320,15 @@ class WindowCapture:
         return roi_to_rect(roi_ratios, frame_shape)
 
     def close(self) -> None:
+        for output_idx, camera in list(self.cameras.items()):
+            for method_name in ("stop", "release"):
+                method = getattr(camera, method_name, None)
+                if not callable(method):
+                    continue
+                try:
+                    method()
+                except Exception as error:
+                    logger.debug("Could not %s dxcam camera %s: %s", method_name, output_idx, error)
         self.cameras.clear()
         self.monitor_rects.clear()
         self.window_handle = None
