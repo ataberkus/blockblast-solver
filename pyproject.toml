@@ -13,6 +13,7 @@ authors = [{ name = "Block Blast Solver contributors" }]
 dependencies = [
     "numba==0.66.0",
     "numpy==2.4.6",
+    "onnxruntime==1.27.1",
     "opencv-python==5.0.0.93",
 ]
 
@@ -25,12 +26,18 @@ dev = [
     "coverage==7.15.1",
     "ruff==0.15.21",
 ]
+train = [
+    "torch==2.7.1",
+]
 
 [project.scripts]
 block-blast-solver = "block_blast_solver.main:main"
 
 [tool.setuptools.packages.find]
 include = ["block_blast_solver*"]
+
+[tool.setuptools.package-data]
+block_blast_solver = ["models/*.onnx"]
 
 [tool.ruff]
 target-version = "py311"

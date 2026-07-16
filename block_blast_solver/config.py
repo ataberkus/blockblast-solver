@@ -28,6 +28,26 @@ def _default_calibration_file() -> Path:
 
 CALIBRATION_FILE = str(_default_calibration_file())
 
+_MODELS_DIR = Path(__file__).resolve().parent / "models"
+BOARD_CELL_MODEL_PATH = os.environ.get(
+    "BLOCK_BLAST_BOARD_CELL_MODEL",
+    str(_MODELS_DIR / "board_cell_classifier.onnx"),
+)
+INVENTORY_MASK_MODEL_PATH = os.environ.get(
+    "BLOCK_BLAST_INVENTORY_MASK_MODEL",
+    str(_MODELS_DIR / "inventory_slot_masker.onnx"),
+)
+T_BOARD = 0.5
+T_MASK = 0.5
+T_CELL = 0.30
+
+
+def vision_force_heuristic() -> bool:
+    return os.environ.get("VISION_FORCE_HEURISTIC", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+VISION_FORCE_HEURISTIC = vision_force_heuristic()
+
 # Envanter parçalarının tahta hücrelerine göre ölçek çarpanı
 PIECE_SCALE_FACTOR = 0.47
 
