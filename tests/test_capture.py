@@ -3,7 +3,21 @@ import unittest
 import numpy as np
 
 from block_blast_solver import config
-from block_blast_solver.modules.capture import StaticFrameCapture, roi_to_rect
+from block_blast_solver.modules.capture import StaticFrameCapture, WindowCapture, roi_to_rect
+
+
+class FakeCamera:
+    def __init__(self, fail_release=False):
+        self.fail_release = fail_release
+        self.calls = []
+
+    def release(self):
+        self.calls.append("release")
+        if self.fail_release:
+            raise RuntimeError("release failed")
+
+    def stop(self):
+        self.calls.append("stop")
 
 
 class StaticCaptureTests(unittest.TestCase):
@@ -37,6 +51,22 @@ class StaticCaptureTests(unittest.TestCase):
         finally:
             config.BOARD_ROI = previous_board
             config.PIECES_ROI = previous_pieces
+
+    def test_window_capture_close_releases_cameras_without_raising(self):
+        capture = object.__new__(WindowCapture)
+        failing_camera = FakeCamera(fail_release=True)
+        ok_camera = FakeCamera()
+        capture.cameras = {0: failing_camera, 1: ok_camera}
+        capture.monitor_rects = {0: (0, 0, 100, 100), 1: (100, 0, 200, 100)}
+        capture.window_handle = object()
+
+        capture.close()
+
+        self.assertEqual(failing_camera.calls, ["stop", "release"])
+        self.assertEqual(ok_camera.calls, ["stop", "release"])
+        self.assertEqual(capture.cameras, {})
+        self.assertEqual(capture.monitor_rects, {})
+        self.assertIsNone(capture.window_handle)
 
 
 if __name__ == "__main__":

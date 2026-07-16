@@ -242,7 +242,7 @@ def get_pieces(frame: np.ndarray, cell_w: float, cell_h: float) -> List[Optional
         if slot_crop.size == 0:
             continue
 
-        scale_factor = getattr(config, "PIECE_SCALE_FACTOR", 0.58)
+        scale_factor = getattr(config, "PIECE_SCALE_FACTOR", 0.47)
         inv_cell_w = cell_w * scale_factor
         inv_cell_h = cell_h * scale_factor
         min_block_area = max(25.0, inv_cell_w * inv_cell_h * 0.15)

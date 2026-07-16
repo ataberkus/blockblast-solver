@@ -21,15 +21,22 @@ def summarize_move_sequence(board_state: np.ndarray,
 
     for move in moves:
         slot = move.get("slot_index", -1)
-        row = move.get("row", -1)
-        col = move.get("col", -1)
+        row = move.get("row")
+        col = move.get("col")
         cleared_rows = []
         cleared_cols = []
         invalid = False
 
-        if slot < 0 or slot >= len(pieces) or pieces[slot] is None:
+        if (not isinstance(slot, (int, np.integer)) or
+                slot < 0 or slot >= len(pieces) or pieces[slot] is None or
+                not isinstance(row, (int, np.integer)) or
+                not isinstance(col, (int, np.integer)) or
+                row < 0 or row >= 8 or col < 0 or col >= 8):
             invalid = True
         else:
+            slot = int(slot)
+            row = int(row)
+            col = int(col)
             piece_matrix = pieces[slot]
             ph, pw = piece_matrix.shape
             placement_cells = []
@@ -198,9 +205,18 @@ class Visualizer:
 
             for idx, move in enumerate(moves):
                 step_num = idx + 1
-                slot = move["slot_index"]
-                row = move["row"]
-                col = move["col"]
+                slot = move.get("slot_index", -1)
+                row = move.get("row")
+                col = move.get("col")
+                if not isinstance(slot, (int, np.integer)) or slot < 0 or slot >= len(pieces):
+                    continue
+                if not isinstance(row, (int, np.integer)) or not isinstance(col, (int, np.integer)):
+                    continue
+                if row < 0 or row >= 8 or col < 0 or col >= 8:
+                    continue
+                slot = int(slot)
+                row = int(row)
+                col = int(col)
 
                 # İlgili adımdaki parça matrisini alarak kapladığı genişlik ve yüksekliği hesapla
                 piece_matrix = pieces[slot]

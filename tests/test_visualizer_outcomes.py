@@ -134,6 +134,24 @@ class VisualizerOutcomeTests(unittest.TestCase):
         self.assertTrue(any("1. P1 -> (1,2)" in text for text in rendered_texts))
         self.assertTrue(any("Estimated score: 42.5" in text for text in rendered_texts))
 
+    def test_draw_hud_skips_malformed_moves_without_crashing(self):
+        config.BOARD_ROI = [0.1, 0.1, 0.8, 0.8]
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        board = np.zeros((8, 8), dtype=np.uint8)
+        pieces = [np.ones((1, 1), dtype=np.uint8), None, None]
+        moves = [
+            {"row": 0, "col": 0},
+            {"slot_index": 99, "row": 0, "col": 0},
+            {"slot_index": 1, "row": 0, "col": 0},
+            {"slot_index": 0, "row": None, "col": 0},
+            {"slot_index": 0, "row": 0, "col": "bad"},
+            {"slot_index": 0, "row": 8, "col": 0},
+        ]
+
+        hud = Visualizer().draw_hud(frame, board, pieces, moves, 0.0, False)
+
+        self.assertEqual(hud.shape, (240, 640, 3))
+
     def test_draw_hud_shows_occluded_and_warning_status_messages(self):
         frame = np.zeros((120, 200, 3), dtype=np.uint8)
         board = np.zeros((8, 8), dtype=np.uint8)
