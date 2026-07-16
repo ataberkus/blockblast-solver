@@ -16,6 +16,7 @@ FUTURE_SET_PERMUTATIONS = np.array(
     ],
     dtype=np.int32,
 )
+MAX_CANDIDATES = 192
 
 # =====================================================================
 # BLOCK BLAST SOLVER - NUMBA HIZLANDIRILMIŞ YAPAY ZEKA ÇÖZÜCÜ (solver.py)
@@ -540,13 +541,13 @@ def clear_completed_lines_jit(board_mask: int, row_start: int, row_count: int, c
     if row_clear_mask != 0 or col_clear_mask != 0:
         u_board = u_board & ~(row_clear_mask | col_clear_mask)
 
-    return int(np.int64(u_board)), clear_count
+    return int(u_board), clear_count
 
 
 @njit(cache=True)
 def simulate_best_single_future_piece_jit(board_mask: int, piece_mask: int, ph: int, pw: int) -> Tuple[bool, int, int]:
     u_board = np.uint64(board_mask)
-    best_board = np.int64(0)
+    best_board = np.uint64(0)
     best_score = -1000000000
     best_clears = 0
     found = False
@@ -557,7 +558,7 @@ def simulate_best_single_future_piece_jit(board_mask: int, piece_mask: int, ph: 
             if (u_board & shifted_piece) != np.uint64(0):
                 continue
 
-            placed_board = np.int64(board_mask) | np.int64(shifted_piece)
+            placed_board = u_board | shifted_piece
             cleared_board, clear_count = clear_completed_lines_jit(placed_board, row, ph, col, pw)
             empty_cells = 64 - popcount(cleared_board)
             future_fits = count_future_piece_fits_jit(cleared_board)
@@ -585,7 +586,7 @@ def simulate_next_set_one_order_jit(board_mask: int,
                                     sample: np.ndarray,
                                     catalog_masks: np.ndarray,
                                     catalog_shapes: np.ndarray) -> Tuple[bool, int, int, int, int]:
-    current_board = board_mask
+    current_board = np.uint64(board_mask)
     total_clears = 0
     clearing_placements = 0
 
@@ -612,7 +613,7 @@ def simulate_next_set_survival_jit(board_mask: int,
                                    catalog_shapes: np.ndarray) -> Tuple[bool, int, int, int, int]:
     """Try every piece order and retain the most playable greedy outcome."""
     best_survived = False
-    best_board = board_mask
+    best_board = np.uint64(board_mask)
     best_clears = 0
     best_placed = 0
     best_clearing_placements = 0
@@ -822,14 +823,14 @@ def solve_recursive(board_mask: int,
                 best_moves_global[d, 2] = current_moves[d, 2]
         return
 
-    candidate_slots = np.empty(192, dtype=np.int32)
-    candidate_rows = np.empty(192, dtype=np.int32)
-    candidate_cols = np.empty(192, dtype=np.int32)
-    candidate_boards = np.empty(192, dtype=np.int64)
-    candidate_clears = np.empty(192, dtype=np.int32)
-    candidate_streaks = np.empty(192, dtype=np.int32)
-    candidate_streak_deltas = np.empty(192, dtype=np.float64)
-    candidate_scores = np.empty(192, dtype=np.float64)
+    candidate_slots = np.empty(MAX_CANDIDATES, dtype=np.int32)
+    candidate_rows = np.empty(MAX_CANDIDATES, dtype=np.int32)
+    candidate_cols = np.empty(MAX_CANDIDATES, dtype=np.int32)
+    candidate_boards = np.empty(MAX_CANDIDATES, dtype=np.uint64)
+    candidate_clears = np.empty(MAX_CANDIDATES, dtype=np.int32)
+    candidate_streaks = np.empty(MAX_CANDIDATES, dtype=np.int32)
+    candidate_streak_deltas = np.empty(MAX_CANDIDATES, dtype=np.float64)
+    candidate_scores = np.empty(MAX_CANDIDATES, dtype=np.float64)
     candidate_count = 0
     u_board = np.uint64(board_mask)
 
@@ -859,7 +860,7 @@ def solve_recursive(board_mask: int,
                 if (u_board & shifted_piece) != np.uint64(0):
                     continue
 
-                placed_board = np.int64(board_mask) | np.int64(shifted_piece)
+                placed_board = u_board | shifted_piece
                 new_board_mask, clear_count = clear_completed_lines_jit(
                     placed_board,
                     row,
@@ -890,6 +891,9 @@ def solve_recursive(board_mask: int,
                     w_line_readiness_survival,
                     w_trap_penalty,
                 )
+                if candidate_count >= MAX_CANDIDATES:
+                    continue
+
                 insertion_index = candidate_count
                 while insertion_index > 0 and ordering_score > candidate_scores[insertion_index - 1]:
                     candidate_slots[insertion_index] = candidate_slots[insertion_index - 1]
@@ -1033,11 +1037,11 @@ def _solve_core(
         }
 
     # Tahtayı bit maskesine dönüştürme
-    board_mask = np.int64(0)
+    board_mask = np.uint64(0)
     for r in range(8):
         for c in range(8):
             if board[r, c] == 1:
-                board_mask = np.int64(board_mask | np.int64(1) << np.int64(r * 8 + c))
+                board_mask = board_mask | (np.uint64(1) << np.uint64(r * 8 + c))
     
     current_moves = np.full((3, 3), -1, dtype=np.int32)
     best_moves_global = np.full((3, 3), -1, dtype=np.int32)
