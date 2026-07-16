@@ -4,7 +4,10 @@ import cv2
 import numpy as np
 
 from block_blast_solver import config
-from block_blast_solver.modules import vision
+from block_blast_solver.modules import vision, vision_models
+
+INVENTORY_SLOT_HEIGHT = 130
+INVENTORY_SLOT_WIDTH = 120
 
 
 def draw_inventory(shapes, block_size=23):
@@ -41,7 +44,32 @@ def draw_inventory(shapes, block_size=23):
     return frame
 
 
+def draw_slot_mask(shape, block_size=23):
+    mask = np.zeros((INVENTORY_SLOT_HEIGHT, INVENTORY_SLOT_WIDTH), dtype=np.float32)
+    shape_w = shape.shape[1] * block_size
+    shape_h = shape.shape[0] * block_size
+    start_x = (INVENTORY_SLOT_WIDTH - shape_w) // 2
+    start_y = (INVENTORY_SLOT_HEIGHT - shape_h) // 2
+
+    for row in range(shape.shape[0]):
+        for col in range(shape.shape[1]):
+            if shape[row, col] == 0:
+                continue
+            x1 = start_x + col * block_size
+            y1 = start_y + row * block_size
+            mask[y1:y1 + block_size, x1:x1 + block_size] = 1.0
+
+    return mask
+
+
 class VisionPieceTests(unittest.TestCase):
+    def setUp(self):
+        self.previous_roi = config.PIECES_ROI
+        self.addCleanup(vision_models.ModelRegistry.reset_for_tests)
+
+    def tearDown(self):
+        config.PIECES_ROI = self.previous_roi
+
     def test_detects_l_pieces_without_expanding_to_phantom_cells(self):
         shapes = [
             np.array([[0, 0, 1], [1, 1, 1]], dtype=np.uint8),
@@ -110,6 +138,62 @@ class VisionPieceTests(unittest.TestCase):
             [piece.tolist() for piece in detected],
             [[[1], [1], [1], [1]], [[1], [1], [1], [1]], [[1], [1], [1], [1]]],
         )
+
+    def test_learned_path_decodes_masks_from_inventory_masker(self):
+        if config.vision_force_heuristic():
+            self.skipTest("learned piece path is disabled when heuristics are forced")
+
+        class FakeMasker:
+            def __init__(self, masks_by_slot):
+                self.masks_by_slot = masks_by_slot
+                self.calls = 0
+
+            def predict_mask(self, slot_bgr):
+                mask = self.masks_by_slot[self.calls]
+                self.calls += 1
+                return mask
+
+        shapes = [
+            np.array([[0, 0, 1], [1, 1, 1]], dtype=np.uint8),
+            np.array([[1, 1], [1, 1]], dtype=np.uint8),
+            np.array([[1], [1], [1], [1]], dtype=np.uint8),
+        ]
+        masker = FakeMasker([draw_slot_mask(shape) for shape in shapes])
+        registry = vision_models.ModelRegistry(None, None)
+        registry.inventory_masker = masker
+        registry.using_learned = True
+        vision_models.ModelRegistry._instance = registry
+
+        frame = draw_inventory([np.zeros((1, 1), dtype=np.uint8) for _ in range(3)])
+        detected = vision.get_pieces(frame, 49.0, 49.0)
+
+        self.assertEqual(masker.calls, 3)
+        self.assertEqual(
+            [None if piece is None else piece.tolist() for piece in detected],
+            [shape.tolist() for shape in shapes],
+        )
+
+    def test_learned_path_fails_closed_when_inventory_masker_raises(self):
+        if config.vision_force_heuristic():
+            self.skipTest("learned piece path is disabled when heuristics are forced")
+
+        class ExplodingMasker:
+            def predict_mask(self, slot_bgr):
+                raise RuntimeError("mask failure")
+
+        shapes = [
+            np.array([[1, 1], [1, 1]], dtype=np.uint8),
+            np.array([[1, 1, 1, 1]], dtype=np.uint8),
+            np.array([[1], [1], [1], [1]], dtype=np.uint8),
+        ]
+        registry = vision_models.ModelRegistry(None, None)
+        registry.inventory_masker = ExplodingMasker()
+        registry.using_learned = True
+        vision_models.ModelRegistry._instance = registry
+
+        detected = vision.get_pieces(draw_inventory(shapes), 49.0, 49.0)
+
+        self.assertEqual([None if piece is None else piece.tolist() for piece in detected], [None, None, None])
 
 
 if __name__ == "__main__":

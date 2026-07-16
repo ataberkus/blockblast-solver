@@ -271,7 +271,53 @@ def _estimate_piece_grid_dims(bbox_w: int, bbox_h: int, inv_cell_w: float, inv_c
     return best_rows, best_cols
 
 
-def get_pieces(frame: np.ndarray, cell_w: float, cell_h: float) -> List[Optional[np.ndarray]]:
+def _piece_from_mask(mask: np.ndarray, inv_cell_w: float, inv_cell_h: float) -> Optional[np.ndarray]:
+    mask_array = np.asarray(mask, dtype=np.float32)
+    if mask_array.ndim != 2:
+        raise ValueError("inventory mask must be a 2D array")
+
+    mask_bin = ((mask_array >= config.T_MASK).astype(np.uint8)) * 255
+    min_block_area = max(25.0, inv_cell_w * inv_cell_h * 0.15)
+    if cv2.countNonZero(mask_bin) < min_block_area:
+        return None
+
+    points = cv2.findNonZero(mask_bin)
+    if points is None:
+        return None
+
+    bx, by, bw, bh = cv2.boundingRect(points)
+    num_rows, num_cols = _estimate_piece_grid_dims(bw, bh, inv_cell_w, inv_cell_h)
+    piece_matrix = np.zeros((num_rows, num_cols), dtype=np.uint8)
+    sub_w = bw / num_cols
+    sub_h = bh / num_rows
+
+    for r in range(num_rows):
+        for c in range(num_cols):
+            sc_x = int(bx + c * sub_w)
+            sc_y = int(by + r * sub_h)
+            sc_w = int(sub_w)
+            sc_h = int(sub_h)
+
+            if sc_w <= 0 or sc_h <= 0:
+                continue
+
+            inner_x = sc_x + int(sc_w * 0.22)
+            inner_y = sc_y + int(sc_h * 0.22)
+            inner_w = max(1, int(sc_w * 0.56))
+            inner_h = max(1, int(sc_h * 0.56))
+
+            mask_cell = mask_bin[inner_y:inner_y + inner_h, inner_x:inner_x + inner_w]
+            mask_ratio = np.mean(mask_cell) / 255.0 if mask_cell.size > 0 else 0.0
+            if mask_ratio > config.T_CELL:
+                piece_matrix[r, c] = 1
+
+    piece_matrix = _trim_empty_edges(piece_matrix)
+    if not np.any(piece_matrix == 1):
+        return None
+    return piece_matrix
+
+
+def _get_pieces_heuristic(frame: np.ndarray, cell_w: float, cell_h: float) -> List[Optional[np.ndarray]]:
     """
     PIECES_ROI koordinatlarını kullanarak inventory'deki 3 parçayı tespit eder.
     Her bir slotu binarize edip en büyük konturu bulur, ardından tahtanın hücre boyutuna
@@ -357,5 +403,52 @@ def get_pieces(frame: np.ndarray, cell_w: float, cell_h: float) -> List[Optional
         piece_matrix = _trim_empty_edges(piece_matrix)
         if np.any(piece_matrix == 1):
             pieces[i] = piece_matrix
+
+    return pieces
+
+
+def get_pieces(frame: np.ndarray, cell_w: float, cell_h: float) -> List[Optional[np.ndarray]]:
+    pieces = [None, None, None]
+    if config.vision_force_heuristic():
+        return _get_pieces_heuristic(frame, cell_w, cell_h)
+
+    registry = vision_models.ModelRegistry.get()
+    masker = registry.inventory_masker
+    if masker is None:
+        return _get_pieces_heuristic(frame, cell_w, cell_h)
+
+    if config.PIECES_ROI is None or cell_w <= 0 or cell_h <= 0:
+        return pieces
+    valid_roi, _ = config.validate_roi(config.PIECES_ROI, "PIECES_ROI")
+    if not valid_roi:
+        return pieces
+
+    h, w, _ = frame.shape
+    px = max(0, int(config.PIECES_ROI[0] * w))
+    py = max(0, int(config.PIECES_ROI[1] * h))
+    pw = min(w - px, int(config.PIECES_ROI[2] * w))
+    ph = min(h - py, int(config.PIECES_ROI[3] * h))
+
+    pieces_crop = frame[py:py + ph, px:px + pw]
+    if pieces_crop.size == 0:
+        return pieces
+
+    scale_factor = getattr(config, "PIECE_SCALE_FACTOR", 0.47)
+    inv_cell_w = cell_w * scale_factor
+    inv_cell_h = cell_h * scale_factor
+    slot_w = pw / 3.0
+
+    try:
+        for i in range(3):
+            slot_x1 = int(i * slot_w)
+            slot_x2 = int((i + 1) * slot_w)
+            slot_crop = pieces_crop[0:ph, slot_x1:slot_x2]
+            if slot_crop.size == 0:
+                continue
+
+            slot_mask = masker.predict_mask(slot_crop)
+            pieces[i] = _piece_from_mask(slot_mask, inv_cell_w, inv_cell_h)
+    except Exception:
+        return [None, None, None]
 
     return pieces
