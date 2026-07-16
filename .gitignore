@@ -12,6 +12,7 @@ htmlcov/
 # Local runtime data
 block_blast_solver/calibration_data.json
 mock_hud_output.png
+datasets/
 
 # Local tooling
 .mcp.json
