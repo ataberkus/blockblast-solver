@@ -23,7 +23,12 @@ Run these before opening a pull request:
 ruff check .
 coverage run -m unittest discover -s tests -v
 coverage report
+coverage report --omit=block_blast_solver/modules/solver.py --fail-under=70
 ```
+
+`solver.py` is included in the full coverage report for visibility, but Numba
+`@njit` bodies are mostly untraceable. The 70% gate therefore omits the solver
+module and relies on the behavioral solver tests for that path.
 
 Solver changes should include deterministic regression cases. Vision changes should include synthetic images or sanitized fixtures that exercise the affected theme, brightness, scale, or occlusion condition.
 

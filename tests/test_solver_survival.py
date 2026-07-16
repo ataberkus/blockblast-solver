@@ -76,6 +76,17 @@ class SurvivalSolverTests(unittest.TestCase):
                     self.assertEqual(board[row + r, col + c], 0)
         self.assertGreater(score, -1e8)
 
+    def test_solves_when_bottom_right_cell_is_occupied(self):
+        board = empty_board()
+        board[7, 7] = 1
+
+        pieces = [piece([[1]]), None, None]
+        moves, score = solver.solve(board, pieces)
+
+        self.assertIsNotNone(moves)
+        self.assertNotEqual((moves[0]["row"], moves[0]["col"]), (7, 7))
+        self.assertGreater(score, -1e8)
+
     def test_preserves_open_three_by_three_space(self):
         board = np.ones((8, 8), dtype=np.uint8)
         board[0:3, 0:3] = 0

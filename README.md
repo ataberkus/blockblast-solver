@@ -58,6 +58,7 @@ python -m pip install -e ".[dev]"
 ruff check .
 coverage run -m unittest discover -s tests -v
 coverage report
+coverage report --omit=block_blast_solver/modules/solver.py --fail-under=70
 ```
 
 Measure warm solver latency with:

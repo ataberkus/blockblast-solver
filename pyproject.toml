@@ -45,10 +45,11 @@ source = ["block_blast_solver"]
 omit = [
     "block_blast_solver/main.py",
     "block_blast_solver/modules/capture.py",
-    "block_blast_solver/modules/solver.py",
 ]
 
 [tool.coverage.report]
-fail_under = 70
+# solver.py is measured for visibility, but Numba @njit bodies are mostly
+# untraceable. The 70% gate is enforced in CI / CONTRIBUTING by re-reporting
+# with --omit=block_blast_solver/modules/solver.py --fail-under=70.
 show_missing = true
 skip_covered = true
